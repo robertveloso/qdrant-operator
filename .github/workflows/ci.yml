@@ -31,6 +31,9 @@ jobs:
           npm run test
   build-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Set up QEMU
@@ -39,16 +42,34 @@ jobs:
           platforms: arm64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build docker images for ARM64
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/qdrant-operator
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.sha }}
+      - name: Build and push docker images for ARM64
         uses: docker/build-push-action@v5
         with:
           context: src/
           file: src/Dockerfile
           platforms: linux/arm64
           push: true
-          tags: ttl.sh/qdrant-operator:1h
-          cache-from: type=registry,ref=ttl.sh/qdrant-operator:buildcache
-          cache-to: type=registry,ref=ttl.sh/qdrant-operator:buildcache,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
   integration-test:
     runs-on: ubuntu-latest
     needs: build-image
@@ -61,7 +82,8 @@ jobs:
       - name: Install qdrant-operator
         run: |
           kubectl apply -f deploy/crds/
-          sed 's|image: .*$|image: ttl.sh/qdrant-operator:1h|' deploy/operator.yaml | kubectl apply -f -
+          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
+          sed "s|image: .*$|image: ${IMAGE_TAG}|" deploy/operator.yaml | kubectl apply -f -
           kubectl rollout status deploy/qdrant-operator -n qdrant-operator
           kubectl logs -n qdrant-operator deploy/qdrant-operator
       - name: Integration test
