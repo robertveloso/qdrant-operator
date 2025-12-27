@@ -57,7 +57,7 @@ jobs:
       - name: Install K3S
         uses: nolar/setup-k3d-k3s@v1
         with:
-          version: v1.26
+          version: v1.32.11+k3s1
       - name: Install qdrant-operator
         run: |
           kubectl apply -f deploy/crds/
