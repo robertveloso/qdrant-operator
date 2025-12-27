@@ -29,7 +29,7 @@ jobs:
         run: |
           cd src
           npm run test
-  integration-test:
+  build-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +49,11 @@ jobs:
           tags: ttl.sh/qdrant-operator:1h
           cache-from: type=registry,ref=ttl.sh/qdrant-operator:buildcache
           cache-to: type=registry,ref=ttl.sh/qdrant-operator:buildcache,mode=max
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build-image
+    steps:
+      - uses: actions/checkout@v4
       - name: Install K3S
         uses: nolar/setup-k3d-k3s@v1
         with:
