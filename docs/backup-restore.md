@@ -1,12 +1,12 @@
 # Qdrand Collections backup/restore guide
 
-In this guide, you will configure the management of Qdrant collection snapshots. 
-Beyond the obvious use case of backup, this can be beneficial for transferring data to a new Qdrant cluster or creating new test collections with a copy of real data. 
-Instant (`spec.snapshots.backupNow`) and scheduled (`spec.snapshots.backupSchedule`) snapshots are both possible. You will create a collection, add data to it, take a snapshot, and restore it to another collection using the `spec.snapshots` parameter in the custom QdrantCollection custom resource. 
+In this guide, you will configure the management of Qdrant collection snapshots.
+Beyond the obvious use case of backup, this can be beneficial for transferring data to a new Qdrant cluster or creating new test collections with a copy of real data.
+Instant (`spec.snapshots.backupNow`) and scheduled (`spec.snapshots.backupSchedule`) snapshots are both possible. You will create a collection, add data to it, take a snapshot, and restore it to another collection using the `spec.snapshots` parameter in the custom QdrantCollection custom resource.
 
 Before you begin, it is necessary to create an S3 bucket and generate a pair of access/secret keys for accessing it.
 
-Also, it is necessary to specify the correct endpoint for the S3 service (`spec.snapshots.s3EndpointURL`), for example, `https://storage.googleapis.com/` for GCP or `https://s3.amazonaws.com/` for AWS. 
+Also, it is necessary to specify the correct endpoint for the S3 service (`spec.snapshots.s3EndpointURL`), for example, `https://storage.googleapis.com/` for GCP or `https://s3.amazonaws.com/` for AWS.
 The access/secret key pair should be stored in a Kubernetes secret (refer it in `spec.snapshots.s3CredentialsSecretName`).
 
 ### Google Cloud Storage
@@ -82,7 +82,7 @@ metadata:
   name: my-cluster
 spec:
   replicas: 3
-  image: qdrant/qdrant:v1.7.4
+  image: qdrant/qdrant:v1.16.3
   apikey: 'true'
   tls:
     enabled: true

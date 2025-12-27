@@ -4,7 +4,7 @@ metadata:
   name: my-cluster
 spec:
   replicas: 3
-  image: qdrant/qdrant:v1.7.4
+  image: qdrant/qdrant:v1.16.3
   apikey: 'true'
   # apikey: 'yourkey'
   # Optional. If not declared - the operator will generate new random key
@@ -24,16 +24,16 @@ spec:
     # Optional. This secret should contain the next fields: cert.pem, key.pem and cacert.pem
     # If not declared - the operator will generate new CA and certificate
   sidecarContainers:
-  - name: nginx
-    image: nginx:1.25
-    ports:
-    - containerPort: 80
+    - name: nginx
+      image: nginx:1.25
+      ports:
+        - containerPort: 80
   additionalVolumes:
-  - name: qdrant-newfolder
-    emptyDir: {}
+    - name: qdrant-newfolder
+      emptyDir: {}
   additionalVolumeMounts:
-  - name: qdrant-newfolder
-    mountPath: /qdrant/newfolder
+    - name: qdrant-newfolder
+      mountPath: /qdrant/newfolder
   resources:
     requests:
       cpu: 10m
@@ -43,37 +43,35 @@ spec:
       memory: 500Mi
   # scheduling options
   tolerations:
-  - key: "app.stateful/component"
-    operator: "Equal"
-    value: "qdrant-operator"
-    effect: NoSchedule
+    - key: 'app.stateful/component'
+      operator: 'Equal'
+      value: 'qdrant-operator'
+      effect: NoSchedule
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 1
-      preference:
-        matchExpressions:
-        - key: "app.stateful/component"
-          operator: In
-          values:
-          - "qdrant-operator"
+      - weight: 1
+        preference:
+          matchExpressions:
+            - key: 'app.stateful/component'
+              operator: In
+              values:
+                - 'qdrant-operator'
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      podAffinityTerm:
-        labelSelector:
-          matchExpressions:
-          - key: clustername
-            operator: In
-            values:
-            - my-cluster
-        topologyKey: kubernetes.io/hostname
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: clustername
+                operator: In
+                values:
+                  - my-cluster
+          topologyKey: kubernetes.io/hostname
   topologySpreadConstraints:
-  - maxSkew: 1
-    topologyKey: "topology.kubernetes.io/zone"
-    whenUnsatisfiable: DoNotSchedule
-    labelSelector:
-      matchLabels:
-        clustername: my-cluster
-        component: qdrant
- 
-
+    - maxSkew: 1
+      topologyKey: 'topology.kubernetes.io/zone'
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          clustername: my-cluster
+          component: qdrant

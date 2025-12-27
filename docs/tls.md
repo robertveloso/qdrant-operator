@@ -12,7 +12,7 @@ metadata:
   name: my-auth-cluster
 spec:
   replicas: 1
-  image: qdrant/qdrant:v1.7.4
+  image: qdrant/qdrant:v1.16.3
   tls:
     enabled: true
 EOF
@@ -28,7 +28,7 @@ metadata:
   name: my-notls-cluster
 spec:
   replicas: 1
-  image: qdrant/qdrant:v1.7.4
+  image: qdrant/qdrant:v1.16.3
 EOF
 ```
 
@@ -82,6 +82,5 @@ You will see a similar output:
 
 6. Press `CTRL-D` to exit the pod shell.
 
-You can also use your own certificates by setting the `spec.tls.parameter` to the name of the secret, which contains the files `cert.pem`, `key.pem` and `cacert.pem`. 
+You can also use your own certificates by setting the `spec.tls.parameter` to the name of the secret, which contains the files `cert.pem`, `key.pem` and `cacert.pem`.
 Self-signed certificates can't be used because Qdrant verifies certificates using CA during peer-to-peer communication.
-

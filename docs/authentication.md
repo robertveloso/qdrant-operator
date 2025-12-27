@@ -12,7 +12,7 @@ metadata:
   name: my-auth-cluster
 spec:
   replicas: 1
-  image: qdrant/qdrant:v1.7.4
+  image: qdrant/qdrant:v1.16.3
   apikey: 'true'
   readApikey: 'true'
 EOF

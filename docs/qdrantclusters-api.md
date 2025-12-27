@@ -1,6 +1,6 @@
 # QdrantCluster API Reference
 
-The QdrantCluster custom resource allows you to define and deploy Qdrant clusters in your Kubernetes environment. 
+The QdrantCluster custom resource allows you to define and deploy Qdrant clusters in your Kubernetes environment.
 Use this API reference to understand the available parameters and their descriptions.
 
 ### Resource Definition
@@ -12,7 +12,7 @@ metadata:
   name: your-cluster-name
 spec:
   replicas: 3
-  image: qdrant/qdrant:v1.7.4
+  image: qdrant/qdrant:v1.16.3
   apikey: 'true'
   readApikey: 'true'
   config:
@@ -89,4 +89,3 @@ spec:
 - **topologySpreadConstraints** (array, optional): Topology spread constraints for the Qdrant cluster.
 
 Feel free to adjust the values based on your specific requirements when creating or updating the QdrantCluster custom resource in your Kubernetes cluster.
-
