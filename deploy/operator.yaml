@@ -66,7 +66,7 @@ data:
   DEBUG_MODE: 'true'
   NODE_TLS_REJECT_UNAUTHORIZED: '0'
   NODE_OPTIONS: '--no-warnings'
-  JOB_IMAGE: 'robertveloso/qdrant-operator:0.3.2'
+  JOB_IMAGE: 'ghcr.io/robertveloso/qdrant-operator/qdrant-operator:main'
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -88,11 +88,8 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: operator
-          image: robertveloso/qdrant-operator:0.3.2
+          image: ghcr.io/robertveloso/qdrant-operator/qdrant-operator:main
           imagePullPolicy: Always
-          # debug
-          # command: ["/bin/sh"]
-          # args: ["-c", "while true; do echo hello; sleep 10;done"]
           resources:
             requests:
               memory: '256Mi'
