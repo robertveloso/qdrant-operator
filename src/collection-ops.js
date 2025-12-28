@@ -195,13 +195,53 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
       `Trying to create a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`
     );
     log(`   URL: ${parameters.url}`);
-    // PUT request to Qdrant API
-    const resp = await fetch(parameters.url, {
-      method: 'PUT',
-      headers: parameters.headers,
-      body: JSON.stringify(body)
-    });
-    const data = await resp.json();
+    log(`   Body: ${JSON.stringify(body)}`);
+    // PUT request to Qdrant API with timeout
+    let resp;
+    try {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      resp = await fetch(parameters.url, {
+        method: 'PUT',
+        headers: parameters.headers,
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchErr) {
+      if (fetchErr.name === 'AbortError') {
+        log(`❌ Request to Qdrant API timed out after 30 seconds`);
+        throw new Error(`Request timeout: Failed to create collection "${name}" - Qdrant API did not respond within 30 seconds`);
+      } else if (fetchErr.code === 'ECONNREFUSED' || fetchErr.message.includes('ECONNREFUSED')) {
+        log(`❌ Connection refused to Qdrant API at ${parameters.url}`);
+        throw new Error(`Connection refused: Cannot connect to Qdrant cluster "${apiObj.spec.cluster}". Is the cluster running?`);
+      } else if (fetchErr.code === 'ENOTFOUND' || fetchErr.message.includes('ENOTFOUND')) {
+        log(`❌ DNS resolution failed for Qdrant API at ${parameters.url}`);
+        throw new Error(`DNS resolution failed: Cannot resolve hostname for cluster "${apiObj.spec.cluster}"`);
+      } else {
+        log(`❌ Network error connecting to Qdrant API: ${fetchErr.message}`);
+        throw new Error(`Network error: ${fetchErr.message}`);
+      }
+    }
+
+    // Parse response JSON
+    let data;
+    try {
+      const text = await resp.text();
+      if (!text) {
+        log(`⚠️ Empty response from Qdrant API`);
+        throw new Error('Empty response from Qdrant API');
+      }
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      log(`❌ Failed to parse response from Qdrant API: ${parseErr.message}`);
+      log(`   Response status: ${resp.status} ${resp.statusText}`);
+      log(`   Response headers: ${JSON.stringify(Object.fromEntries(resp.headers.entries()))}`);
+      throw new Error(`Invalid JSON response from Qdrant API: ${parseErr.message}`);
+    }
+
     log(
       `Response status: "${JSON.stringify(data.status)}", time: "${data.time}".`
     );
