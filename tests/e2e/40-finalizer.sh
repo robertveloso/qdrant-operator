@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/utils.sh"
 log_test "Finalizer: Verifying proper cleanup on cluster deletion"
 
 log_info "Deleting QdrantCollection first (if it exists)..."
-kubectl delete qdrantcollection my-collection -n default 2>/dev/null || true
+kubectl delete qdrantcollections my-collection -n default 2>/dev/null || true
 
 log_info "Waiting for collection to be deleted..."
 sleep 5
@@ -35,9 +35,9 @@ if [ -n "${PODS}" ]; then
 fi
 
 log_info "Verifying collection was cleaned up..."
-if kubectl get qdrantcollection my-collection -n default 2>/dev/null; then
+if kubectl get qdrantcollections my-collection -n default 2>/dev/null; then
   log_error "Collection still exists after deletion"
-  kubectl get qdrantcollection my-collection -n default -o yaml
+  kubectl get qdrantcollections my-collection -n default -o yaml
   exit 1
 fi
 

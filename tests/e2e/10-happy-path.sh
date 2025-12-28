@@ -36,6 +36,6 @@ done
 
 log_error "Collection never became green after ${max_attempts} attempts"
 log_info "Collection status:"
-kubectl get qdrantcollection my-collection -n default -o yaml || true
+kubectl get qdrantcollections my-collection -n default -o yaml || true
 exit 1
 

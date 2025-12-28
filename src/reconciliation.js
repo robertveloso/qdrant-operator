@@ -525,7 +525,10 @@ export const reconcileCollection = async (apiObj) => {
         k8sCustomApi,
         k8sCoreApi
       );
-      const healthUrl = parameters.url.replace(/\/collections\/[^/]+$/, '/collections');
+      const healthUrl = parameters.url.replace(
+        /\/collections\/[^/]+$/,
+        '/collections'
+      );
       const healthController = new AbortController();
       const healthTimeout = setTimeout(() => healthController.abort(), 5000);
 

@@ -17,7 +17,7 @@ if ! kubectl get qdrantcluster my-cluster -n default 2>/dev/null; then
 fi
 
 log_info "Verifying collection exists..."
-if ! kubectl get qdrantcollection my-collection -n default 2>/dev/null; then
+if ! kubectl get qdrantcollections my-collection -n default 2>/dev/null; then
   log_info "Collection not found, creating..."
   kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-collection-minimal.yaml"
   sleep 10
@@ -70,7 +70,7 @@ sleep 2
 
 # Delete cluster while under load
 log_info "Deleting QdrantCollection (should trigger finalizer)..."
-kubectl delete qdrantcollection my-collection -n default
+kubectl delete qdrantcollections my-collection -n default
 
 log_info "Deleting QdrantCluster (should trigger finalizer while under load)..."
 kubectl delete qdrantcluster my-cluster -n default
@@ -99,9 +99,9 @@ if [ -n "${PODS}" ]; then
 fi
 
 log_info "Verifying collection was cleaned up..."
-if kubectl get qdrantcollection my-collection -n default 2>/dev/null; then
+if kubectl get qdrantcollections my-collection -n default 2>/dev/null; then
   log_error "Collection still exists after deletion"
-  kubectl get qdrantcollection my-collection -n default -o yaml
+  kubectl get qdrantcollections my-collection -n default -o yaml
   exit 1
 fi
 
