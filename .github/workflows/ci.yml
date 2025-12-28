@@ -123,16 +123,69 @@ jobs:
           kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
       - name: Integration test
         run: |
+          echo "📦 Creating Qdrant cluster..."
           kubectl apply -f examples/qdrant-cluster-minimal.yaml
-          sleep 3s && kubectl rollout status statefulset my-cluster
-          kubectl apply -f examples/qdrant-collection-minimal.yaml
-          export PODNAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o name|head -n 1)
-          export RESULT=$(kubectl exec -n qdrant-operator -t $PODNAME -- curl -s "http://my-cluster.default:6333/collections/my-collection")
-          echo "Qdrant response is:"
-          echo $RESULT
-          if [[ $RESULT =~ "\"status\":\"green\"" ]]; then
-            echo "Collection \"my-collection\" is available!"
-          else
-            echo "Something went wrong!"
+
+          echo "⏳ Waiting for operator to create StatefulSet (timeout: 60s)..."
+          timeout=60
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            if kubectl get statefulset my-cluster -n default 2>/dev/null; then
+              echo "✅ StatefulSet created!"
+              break
+            fi
+            echo "   Waiting for StatefulSet... (${elapsed}s/${timeout}s)"
+            sleep 5
+            elapsed=$((elapsed + 5))
+          done
+
+          if ! kubectl get statefulset my-cluster -n default 2>/dev/null; then
+            echo "❌ StatefulSet not created within timeout"
+            echo "📋 QdrantCluster status:"
+            kubectl get qdrantcluster my-cluster -n default -o yaml || true
+            echo "📋 Operator logs:"
+            kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
             exit 1
           fi
+
+          echo "⏳ Waiting for StatefulSet rollout (timeout: 120s)..."
+          kubectl rollout status statefulset my-cluster -n default --timeout=120s || {
+            echo "❌ StatefulSet rollout failed"
+            kubectl get pods -n default -l clustername=my-cluster
+            kubectl describe statefulset my-cluster -n default
+            exit 1
+          }
+
+          echo "📦 Creating Qdrant collection..."
+          kubectl apply -f examples/qdrant-collection-minimal.yaml
+
+          echo "⏳ Waiting for collection to be ready..."
+          sleep 10
+
+          export PODNAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o name|head -n 1)
+          echo "🔍 Checking collection status via pod: ${PODNAME}"
+
+          # Retry a few times in case collection is still being created
+          max_attempts=6
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            export RESULT=$(kubectl exec -n qdrant-operator -t $PODNAME -- curl -s "http://my-cluster.default:6333/collections/my-collection" 2>/dev/null || echo "")
+            echo "Attempt $attempt/$max_attempts - Qdrant response:"
+            echo "$RESULT"
+
+            if [[ $RESULT =~ "\"status\":\"green\"" ]]; then
+              echo "✅ Collection \"my-collection\" is available!"
+              exit 0
+            fi
+
+            if [ $attempt -lt $max_attempts ]; then
+              echo "   Collection not ready yet, waiting 5s..."
+              sleep 5
+            fi
+            attempt=$((attempt + 1))
+          done
+
+          echo "❌ Collection not available after $max_attempts attempts"
+          echo "📋 Collection status:"
+          kubectl get qdrantcollection my-collection -n default -o yaml || true
+          exit 1
