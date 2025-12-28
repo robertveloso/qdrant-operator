@@ -118,6 +118,9 @@ const main = async () => {
       collectionsManaged.set(collections.length);
 
       // Periodic reconciliation for collections
+      log(
+        `🔄 Periodic reconciliation: Found ${collections.length} collection(s) to reconcile...`
+      );
       for (const collection of collections) {
         const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
         // Skip if deletion is in progress
@@ -125,8 +128,14 @@ const main = async () => {
           continue;
         }
         // Update cache
+        const wasInCache = collectionCache.has(resourceKey);
         collectionCache.set(resourceKey, collection);
-        // Reconcile
+        // Reconcile - always schedule, even if in cache (ensures eventual consistency)
+        if (!wasInCache) {
+          log(
+            `🔍 Found collection "${collection.metadata.name}" not in cache during periodic reconciliation, scheduling...`
+          );
+        }
         scheduleReconcile(collection, 'collection');
       }
     } catch (err) {

@@ -141,19 +141,33 @@ export const onEventCluster = async (phase, apiObj) => {
 
 // React on QdrantCollections events
 export const onEventCollection = async (phase, apiObj) => {
-  const name = apiObj.metadata.name;
-  const namespace = apiObj.metadata.namespace;
+  const name = apiObj.metadata?.name || 'unknown';
+  const namespace = apiObj.metadata?.namespace || 'unknown';
   const resourceKey = `${namespace}/${name}`;
+
+  // Log immediately when function is called (before any processing)
+  log(
+    `🎯 onEventCollection called for collection "${name}" in namespace "${namespace}" (phase: ${phase})`
+  );
+
   const endTimer = reconcileDuration.startTimer({
     resource_type: 'collection'
   });
 
   try {
+    // Log ALL events received, even if they might be duplicates
+    log(
+      `📨 Event received for collection "${name}" (phase: ${phase}, resourceVersion: ${apiObj.metadata.resourceVersion}, lastRV: ${lastCollectionResourceVersion.get(resourceKey) || 'none'})`
+    );
+
     // ignore duplicated event on watch reconnections (per-collection)
     if (
       lastCollectionResourceVersion.get(resourceKey) ===
       apiObj.metadata.resourceVersion
     ) {
+      log(
+        `⏭️ Skipping duplicate event for collection "${name}" (resourceVersion: ${apiObj.metadata.resourceVersion})`
+      );
       endTimer();
       return;
     }
