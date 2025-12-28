@@ -12,6 +12,23 @@ import { watchRestarts, errorsTotal, watchActive } from './metrics.js';
 import { log } from './utils.js';
 import { onEventCluster, onEventCollection } from './events.js';
 
+// Wrapper function to safely call readNamespacedLease with proper validation
+const safeReadNamespacedLease = async (name, namespace) => {
+  // Final validation before calling the API
+  if (name == null || namespace == null) {
+    throw new Error(`Invalid parameters: name=${name}, namespace=${namespace}`);
+  }
+  if (typeof name !== 'string' || typeof namespace !== 'string') {
+    throw new Error(`Parameters must be strings: name=${typeof name}, namespace=${typeof namespace}`);
+  }
+  if (name === '' || namespace === '') {
+    throw new Error(`Parameters cannot be empty: name="${name}", namespace="${namespace}"`);
+  }
+
+  // Call the API with validated parameters
+  return await k8sCoordinationApi.readNamespacedLease(name, namespace);
+};
+
 const MAX_RECONNECT_DELAY = 60000; // 60 segundos máximo
 const INITIAL_RECONNECT_DELAY = 2000; // Começar com 2 segundos
 
@@ -161,10 +178,7 @@ export const watchResource = async () => {
       return;
     }
 
-    const res = await k8sCoordinationApi.readNamespacedLease(
-      nameParam,
-      namespaceParam
-    );
+    const res = await safeReadNamespacedLease(nameParam, namespaceParam);
     if (res.body.spec.holderIdentity !== process.env.POD_NAME) {
       log('Not the leader anymore, stopping watch...');
       return;

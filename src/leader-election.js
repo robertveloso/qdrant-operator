@@ -5,6 +5,23 @@ import { abortAllWatches } from './watch.js';
 import { shuttingDown, activeReconciles } from './state.js';
 import { log } from './utils.js';
 
+// Wrapper function to safely call readNamespacedLease with proper validation
+const safeReadNamespacedLease = async (name, namespace) => {
+  // Final validation before calling the API
+  if (name == null || namespace == null) {
+    throw new Error(`Invalid parameters: name=${name}, namespace=${namespace}`);
+  }
+  if (typeof name !== 'string' || typeof namespace !== 'string') {
+    throw new Error(`Parameters must be strings: name=${typeof name}, namespace=${typeof namespace}`);
+  }
+  if (name === '' || namespace === '') {
+    throw new Error(`Parameters cannot be empty: name="${name}", namespace="${namespace}"`);
+  }
+
+  // Call the API with validated parameters
+  return await k8sCoordinationApi.readNamespacedLease(name, namespace);
+};
+
 // Kubernetes Leases for leader election (initialized in main() after env validation)
 export let lock = null;
 
@@ -71,9 +88,11 @@ export const ensureLeaseExists = async () => {
       log(`   typeof nameParam: ${typeof nameParam}, typeof namespaceParam: ${typeof namespaceParam}`);
       log(`   nameParam === null: ${nameParam === null}, nameParam === undefined: ${nameParam === undefined}`);
       log(`   namespaceParam === null: ${namespaceParam === null}, namespaceParam === undefined: ${namespaceParam === undefined}`);
+      log(`   nameParam value: ${JSON.stringify(nameParam)}, namespaceParam value: ${JSON.stringify(namespaceParam)}`);
     }
 
-    await k8sCoordinationApi.readNamespacedLease(nameParam, namespaceParam);
+    // Call API using wrapper function for safer parameter handling
+    await safeReadNamespacedLease(nameParam, namespaceParam);
     log('✅ Lease already exists');
     return;
   } catch (err) {
@@ -160,7 +179,7 @@ export const ensureLeaseExists = async () => {
               break;
             }
 
-            await k8sCoordinationApi.readNamespacedLease(nameParam, namespaceParam);
+            await safeReadNamespacedLease(nameParam, namespaceParam);
             log('✅ Lease is now readable');
             break;
           } catch (readErr) {
@@ -261,10 +280,7 @@ export const isLeader = async () => {
       return;
     }
 
-    const res = await k8sCoordinationApi.readNamespacedLease(
-      nameParam,
-      namespaceParam
-    );
+    const res = await safeReadNamespacedLease(nameParam, namespaceParam);
 
     // Get holder identity (can be empty string, undefined, or a pod name)
     const holder = res.body?.spec?.holderIdentity;
