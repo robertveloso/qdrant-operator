@@ -18,8 +18,36 @@ const safeReadNamespacedLease = async (name, namespace) => {
     throw new Error(`Parameters cannot be empty: name="${name}", namespace="${namespace}"`);
   }
 
-  // Call the API with validated parameters
-  return await k8sCoordinationApi.readNamespacedLease(name, namespace);
+  // Ensure parameters are explicitly strings (defensive programming)
+  const nameStr = String(name);
+  const namespaceStr = String(namespace);
+
+  // Final check after string conversion
+  if (nameStr === '' || namespaceStr === '' || nameStr === 'null' || nameStr === 'undefined' ||
+    namespaceStr === 'null' || namespaceStr === 'undefined') {
+    throw new Error(`Parameters invalid after string conversion: name="${nameStr}", namespace="${namespaceStr}"`);
+  }
+
+  // Log parameters right before API call (only in debug mode)
+  if (process.env.DEBUG_MODE === 'true') {
+    log(`safeReadNamespacedLease: About to call API with name="${nameStr}", namespace="${namespaceStr}"`);
+    log(`   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`);
+    log(`   nameStr === null: ${nameStr === null}, nameStr === undefined: ${nameStr === undefined}`);
+    log(`   namespaceStr === null: ${namespaceStr === null}, namespaceStr === undefined: ${namespaceStr === undefined}`);
+  }
+
+  // Call the API with validated and converted parameters
+  try {
+    return await k8sCoordinationApi.readNamespacedLease(nameStr, namespaceStr);
+  } catch (err) {
+    // Log detailed error information if in debug mode
+    if (process.env.DEBUG_MODE === 'true') {
+      log(`Error in safeReadNamespacedLease: ${err.message || String(err)}`);
+      log(`   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`);
+      log(`   Error stack: ${err.stack || 'No stack trace'}`);
+    }
+    throw err;
+  }
 };
 
 // Kubernetes Leases for leader election (initialized in main() after env validation)
@@ -428,10 +456,7 @@ export const acquireLeaderLock = async () => {
         return; // Silently skip if params invalid after conversion
       }
 
-      const res = await k8sCoordinationApi.readNamespacedLease(
-        nameParam,
-        namespaceParam
-      );
+      const res = await safeReadNamespacedLease(nameParam, namespaceParam);
       const currentLeader = res.body.spec.holderIdentity;
       if (currentLeader && currentLeader !== process.env.POD_NAME) {
         log(
