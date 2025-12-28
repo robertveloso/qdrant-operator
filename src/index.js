@@ -1,9 +1,5 @@
 import { k8sCustomApi } from './k8s-client.js';
-import {
-  applyQueue,
-  clusterCache,
-  collectionCache
-} from './state.js';
+import { applyQueue, clusterCache, collectionCache } from './state.js';
 import {
   initializeLeaderElection,
   acquireLeaderLock,

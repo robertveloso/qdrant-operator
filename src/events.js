@@ -11,7 +11,12 @@ import {
 import { addFinalizer, removeFinalizer } from './finalizers.js';
 import { cleanupCluster, cleanupCollection } from './cleanup.js';
 import { scheduleReconcile } from './reconciliation.js';
-import { reconcileTotal, reconcileDuration, errorsTotal, reconcileQueueDepth } from './metrics.js';
+import {
+  reconcileTotal,
+  reconcileDuration,
+  errorsTotal,
+  reconcileQueueDepth
+} from './metrics.js';
 import { deleteCollection } from './collection-ops.js';
 import { log } from './utils.js';
 

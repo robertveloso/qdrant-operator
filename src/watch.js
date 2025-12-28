@@ -6,10 +6,9 @@ import {
   collectionWatchRequest,
   statefulSetWatchRequests,
   statefulSetWatchAborted,
-  reconnectAttempts,
-  watchActive
+  reconnectAttempts
 } from './state.js';
-import { watchRestarts, errorsTotal } from './metrics.js';
+import { watchRestarts, errorsTotal, watchActive } from './metrics.js';
 import { log } from './utils.js';
 import { onEventCluster, onEventCollection } from './events.js';
 

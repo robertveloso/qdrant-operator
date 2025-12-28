@@ -30,7 +30,11 @@ import {
 import { setStatus, updateResourceVersion } from './status.js';
 import { calculateSpecHash, updateLastAppliedHash } from './spec-hash.js';
 import { waitForClusterReadiness } from './readiness.js';
-import { errorsTotal, driftDetectedTotal, reconcileQueueDepth } from './metrics.js';
+import {
+  errorsTotal,
+  driftDetectedTotal,
+  reconcileQueueDepth
+} from './metrics.js';
 import { log } from './utils.js';
 
 // Schedule reconciliation (declarative model - replaces scheduleApplying)
