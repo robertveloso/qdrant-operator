@@ -306,6 +306,26 @@ export const reconcileCollection = async (apiObj) => {
   // For collections, reconciliation is simpler - just ensure it exists in Qdrant
   // The actual collection creation/update is handled by createCollection/updateCollection
   try {
+    // CRITICAL: Fetch latest collection object from Kubernetes to ensure we have current state
+    let currentCollection = apiObj;
+    try {
+      const latestCollection = await k8sCustomApi.getNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantcollections',
+        name: name
+      });
+      currentCollection = latestCollection;
+      // Update cache with latest object
+      collectionCache.set(resourceKey, currentCollection);
+    } catch (err) {
+      log(
+        `⚠️ Error fetching latest collection object for "${name}": ${err.message}. Using provided object.`
+      );
+      // Continue with provided object if fetch fails
+    }
+
     // CRITICAL: Check if cluster is ready before attempting to create/update collection
     // Collections can only be created when the cluster is in "Running" status
     let clusterStatus = null;
@@ -325,7 +345,7 @@ export const reconcileCollection = async (apiObj) => {
       );
       // Cluster might not exist yet or API error - schedule retry
       setTimeout(() => {
-        scheduleReconcile(apiObj, 'collection');
+        scheduleReconcile(currentCollection, 'collection');
       }, 10000); // Retry in 10 seconds
       return;
     }
@@ -337,7 +357,7 @@ export const reconcileCollection = async (apiObj) => {
       );
       // Schedule retry after delay
       setTimeout(() => {
-        scheduleReconcile(apiObj, 'collection');
+        scheduleReconcile(currentCollection, 'collection');
       }, 10000); // Retry in 10 seconds
       return;
     }
@@ -354,14 +374,29 @@ export const reconcileCollection = async (apiObj) => {
     // and try to update (PATCH) instead of create (PUT), but PATCH doesn't create
     // collections that don't exist yet
 
-    // Update cache for performance (but don't use it for decision-making)
-    collectionCache.set(resourceKey, apiObj);
-
     // Always try to create first (PUT is idempotent in Qdrant)
     // If collection already exists, PUT will succeed and update it if needed
-    log(`Creating/updating collection "${name}" in cluster "${clusterName}"...`);
-    await createCollection(apiObj, k8sCustomApi, k8sCoreApi);
-    await applyJobs(apiObj, k8sCustomApi, k8sBatchApi);
+    log(
+      `Creating/updating collection "${name}" in cluster "${clusterName}"...`
+    );
+    try {
+      await createCollection(currentCollection, k8sCustomApi, k8sCoreApi);
+      log(`✅ Collection "${name}" creation/update completed successfully`);
+    } catch (createErr) {
+      log(
+        `❌ Failed to create collection "${name}": ${createErr.message}. Will retry...`
+      );
+      throw createErr; // Re-throw to be caught by outer catch
+    }
+    try {
+      await applyJobs(currentCollection, k8sCustomApi, k8sBatchApi);
+      log(`✅ Jobs applied successfully for collection "${name}"`);
+    } catch (jobsErr) {
+      log(
+        `⚠️ Error applying jobs for collection "${name}": ${jobsErr.message}. Collection was created but jobs failed.`
+      );
+      // Don't throw - jobs are optional, collection creation is the critical part
+    }
     log(`✅ Completed reconciliation for collection "${name}"`);
   } catch (err) {
     log(`❌ Error reconciling collection "${name}": ${err.message}`);
@@ -371,9 +406,24 @@ export const reconcileCollection = async (apiObj) => {
     errorsTotal.inc({ type: 'reconcile' });
     // Don't throw - schedule retry instead to allow recovery
     // This prevents the error from being lost if it's a transient issue
-    setTimeout(() => {
-      scheduleReconcile(apiObj, 'collection');
-    }, 10000); // Retry in 10 seconds
+    // Fetch latest object before retrying
+    try {
+      const latestCollection = await k8sCustomApi.getNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantcollections',
+        name: name
+      });
+      setTimeout(() => {
+        scheduleReconcile(latestCollection, 'collection');
+      }, 10000); // Retry in 10 seconds
+    } catch (fetchErr) {
+      // If we can't fetch latest, use provided object
+      setTimeout(() => {
+        scheduleReconcile(apiObj, 'collection');
+      }, 10000); // Retry in 10 seconds
+    }
   }
 };
 

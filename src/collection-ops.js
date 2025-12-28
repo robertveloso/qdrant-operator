@@ -202,9 +202,11 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
       body: JSON.stringify(body)
     });
     const data = await resp.json();
-    log(`Status: "${JSON.stringify(data.status)}", time: "${data.time}".`);
+    log(
+      `Response status: "${JSON.stringify(data.status)}", time: "${data.time}".`
+    );
 
-    // Check HTTP status code
+    // Check HTTP status code first
     if (!resp.ok) {
       const errorMsg =
         data.status?.error || `HTTP ${resp.status}: ${resp.statusText}`;
@@ -235,8 +237,10 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
         `✅ Collection "${name}" created successfully (status: ${JSON.stringify(data.status)})`
       );
     } else {
+      // Unexpected response format - log warning but don't fail
+      // This handles edge cases where Qdrant might return different formats
       log(
-        `⚠️ Unexpected response format for collection "${name}": ${JSON.stringify(data.status)}`
+        `⚠️ Unexpected response format for collection "${name}": ${JSON.stringify(data.status)}. Assuming success since HTTP status was ${resp.status}.`
       );
     }
   } catch (err) {
