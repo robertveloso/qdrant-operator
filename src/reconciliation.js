@@ -233,6 +233,9 @@ export const reconcileCluster = async (apiObj) => {
     await applyServiceHeadlessCluster(apiObj, k8sCoreApi);
     await applyServiceCluster(apiObj, k8sCoreApi);
     await applyPdbCluster(apiObj, k8sPolicyApi);
+    const { k8sNetworkingApi } = await import('./k8s-client.js');
+    const { applyNetworkPolicyCluster } = await import('./cluster-ops.js');
+    await applyNetworkPolicyCluster(apiObj, k8sNetworkingApi);
     await applyCluster(apiObj, k8sAppsApi, k8sCoreApi);
 
     // Update cache after creating
@@ -306,6 +309,51 @@ export const reconcileCluster = async (apiObj) => {
   await applyServiceHeadlessCluster(apiObj, k8sCoreApi);
   await applyServiceCluster(apiObj, k8sCoreApi);
   await applyPdbCluster(apiObj, k8sPolicyApi);
+  const { k8sNetworkingApi } = await import('./k8s-client.js');
+  const { applyNetworkPolicyCluster } = await import('./cluster-ops.js');
+  await applyNetworkPolicyCluster(apiObj, k8sNetworkingApi);
+
+  // Check and expand PVCs if size increased (automatic volume expansion)
+  const {
+    expandPVCIfNeeded,
+    createClusterVolumeSnapshot,
+    cleanupOldSnapshots
+  } = await import('./pvc-ops.js');
+  await expandPVCIfNeeded(apiObj);
+
+  // Handle VolumeSnapshots if configured
+  if (apiObj.spec.volumeSnapshots?.enabled) {
+    const snapshotClassName =
+      apiObj.spec.volumeSnapshots.snapshotClassName ||
+      apiObj.spec.persistence?.volumeSnapshotClassName;
+
+    // Create snapshot if requested (one-time trigger)
+    if (apiObj.spec.volumeSnapshots.createNow) {
+      const snapshotName = `${name}-snapshot-${Date.now()}`;
+      await createClusterVolumeSnapshot(
+        apiObj,
+        snapshotName,
+        snapshotClassName
+      );
+
+      // Reset createNow flag (would need to patch CR, but for now just log)
+      log(
+        `ℹ️ VolumeSnapshot created. Consider removing createNow flag from spec.`
+      );
+    }
+
+    // Create/update CronJob for scheduled snapshots
+    if (apiObj.spec.volumeSnapshots.schedule) {
+      const { applyVolumeSnapshotCronJob } = await import('./pvc-ops.js');
+      await applyVolumeSnapshotCronJob(apiObj);
+    }
+
+    // Cleanup old snapshots based on retention policy (if not using CronJob)
+    if (!apiObj.spec.volumeSnapshots.schedule) {
+      const retentionCount = apiObj.spec.volumeSnapshots.retentionCount || 7;
+      await cleanupOldSnapshots(name, namespace, retentionCount);
+    }
+  }
 
   // Apply secrets only if they might have changed (they have their own idempotency logic)
   const readApikey = await applyReadSecretCluster(apiObj, k8sCoreApi);
@@ -315,7 +363,16 @@ export const reconcileCluster = async (apiObj) => {
   // Phase 3: Apply StatefulSet only if drift detected (avoids unnecessary rollouts)
   // Note: Kubernetes is idempotent - applying StatefulSet only triggers rollout if spec actually changed
   if (needsStatefulSetReconcile) {
-    await setStatus(apiObj, 'Pending');
+    const { setStatusWithPhase } = await import('./status.js');
+    await setStatusWithPhase(apiObj, 'OperationInProgress', [
+      {
+        type: 'Reconciling',
+        status: 'True',
+        lastTransitionTime: new Date().toISOString(),
+        reason: 'StatefulSetUpdate',
+        message: 'Updating StatefulSet to match desired state'
+      }
+    ]);
     await applyCluster(apiObj, k8sAppsApi, k8sCoreApi);
 
     // Update cache after applying
@@ -361,10 +418,34 @@ export const reconcileCluster = async (apiObj) => {
         const sts = stsRes;
         if (
           sts.status?.availableReplicas >= sts.spec.replicas &&
-          sts.status?.updatedReplicas >= sts.spec.replicas
+          sts.status?.updatedReplicas >= sts.spec.replicas &&
+          sts.status?.readyReplicas >= sts.spec.replicas
         ) {
-          await setStatus(apiObj, 'Running');
+          const { setStatusWithPhase } = await import('./status.js');
+          await setStatusWithPhase(apiObj, 'Healthy', [
+            {
+              type: 'Ready',
+              status: 'True',
+              lastTransitionTime: new Date().toISOString(),
+              reason: 'AllReplicasReady',
+              message: `All ${sts.spec.replicas} replicas are ready and available`
+            }
+          ]);
           await updateResourceVersion(apiObj);
+        } else {
+          // Cluster is running but not all replicas are ready yet
+          const { setStatusWithPhase } = await import('./status.js');
+          const available = sts.status?.availableReplicas || 0;
+          const desired = sts.spec.replicas;
+          await setStatusWithPhase(apiObj, 'OperationInProgress', [
+            {
+              type: 'Ready',
+              status: 'False',
+              lastTransitionTime: new Date().toISOString(),
+              reason: 'ReplicasNotReady',
+              message: `${available}/${desired} replicas are ready`
+            }
+          ]);
         }
       }
     } catch (err) {
@@ -419,7 +500,7 @@ export const reconcileCollection = async (apiObj) => {
     }
 
     // CRITICAL: Check if cluster is ready before attempting to create/update collection
-    // Collections can only be created when the cluster is in "Running" status
+    // Collections can only be created when the cluster is in "Running" or "Healthy" status
     let clusterStatus = null;
     let clusterStatusRes = null;
     try {
@@ -459,7 +540,7 @@ export const reconcileCollection = async (apiObj) => {
 
     // If cluster is not ready, check StatefulSet directly as fallback
     // Status may be stale even when StatefulSet is actually ready
-    if (clusterStatus !== 'Running') {
+    if (clusterStatus !== 'Running' && clusterStatus !== 'Healthy') {
       // Verificar StatefulSet diretamente como fallback
       let stsReady = false;
       try {
@@ -472,7 +553,11 @@ export const reconcileCollection = async (apiObj) => {
           sts.status?.availableReplicas >= sts.spec?.replicas &&
           sts.status?.updatedReplicas >= sts.spec?.replicas;
 
-        if (stsReady && clusterStatus !== 'Running') {
+        if (
+          stsReady &&
+          clusterStatus !== 'Running' &&
+          clusterStatus !== 'Healthy'
+        ) {
           log(
             `⚠️ Cluster status is "${clusterStatus}" but StatefulSet is ready. Proceeding with collection creation (status may be stale)...`
           );

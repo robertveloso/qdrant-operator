@@ -1,0 +1,85 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{:metadata.name}}-volumesnapshot-{{:timestamp}}
+  namespace: {{:metadata.namespace}}
+  ownerReferences:
+  - apiVersion: {{:apiVersion}}
+    kind: {{:kind}}
+    name: {{:metadata.name}}
+    uid: {{:metadata.uid}}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: qdrant-operator-sa
+      containers:
+      - name: volumesnapshot
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          CLUSTER_NAME={{:metadata.name}}
+          NAMESPACE={{:metadata.namespace}}
+          REPLICAS={{:replicas}}
+          SNAPSHOT_NAME=${CLUSTER_NAME}-snapshot-$(date +%s)
+          SNAPSHOT_CLASS={{:snapshotClassName}}
+
+          for i in $(seq 0 $((REPLICAS-1))); do
+            PVC_NAME="qdrant-storage-${CLUSTER_NAME}-${i}"
+            INDIVIDUAL_SNAPSHOT="${SNAPSHOT_NAME}-${i}"
+
+            # Check if PVC exists
+            if ! kubectl get pvc "${PVC_NAME}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+              echo "PVC ${PVC_NAME} not found, skipping"
+              continue
+            fi
+
+            # Create VolumeSnapshot
+            cat <<EOF | kubectl apply -f -
+          apiVersion: snapshot.storage.k8s.io/v1
+          kind: VolumeSnapshot
+          metadata:
+            name: ${INDIVIDUAL_SNAPSHOT}
+            namespace: ${NAMESPACE}
+            labels:
+              clustername: ${CLUSTER_NAME}
+              component: qdrant
+              app.kubernetes.io/managed-by: qdrant-operator
+          spec:
+            source:
+              persistentVolumeClaimName: ${PVC_NAME}
+          EOF
+
+            if [ -n "${SNAPSHOT_CLASS}" ]; then
+              kubectl patch volumesnapshot ${INDIVIDUAL_SNAPSHOT} -n ${NAMESPACE} --type='merge' -p="{\"spec\":{\"volumeSnapshotClassName\":\"${SNAPSHOT_CLASS}\"}}"
+            fi
+
+            echo "Created VolumeSnapshot ${INDIVIDUAL_SNAPSHOT} for PVC ${PVC_NAME}"
+          done
+
+          # Cleanup old snapshots if retention is configured
+          RETENTION={{:retentionCount}}
+          if [ "${RETENTION}" -gt 0 ]; then
+            echo "Cleaning up old snapshots (retention: ${RETENTION})..."
+            SNAPSHOTS=$(kubectl get volumesnapshots -n ${NAMESPACE} -l clustername=${CLUSTER_NAME},component=qdrant --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[*].metadata.name}')
+            SNAPSHOT_COUNT=$(echo "${SNAPSHOTS}" | wc -w)
+            if [ "${SNAPSHOT_COUNT}" -gt "${RETENTION}" ]; then
+              TO_DELETE=$((SNAPSHOT_COUNT - RETENTION))
+              for snapshot in $(echo "${SNAPSHOTS}" | cut -d' ' -f1-${TO_DELETE}); do
+                echo "Deleting old snapshot: ${snapshot}"
+                kubectl delete volumesnapshot "${snapshot}" -n "${NAMESPACE}" || true
+              done
+            fi
+          fi
+
+          echo "VolumeSnapshot job completed successfully"
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+      restartPolicy: Never
+

@@ -1,0 +1,20 @@
+apiVersion: qdrant.operator/v1alpha1
+kind: QdrantCluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  replicas: 3
+  image: qdrant/qdrant:v1.16.3
+  persistence:
+    size: 10Gi
+    storageClassName: standard
+    volumeSnapshotClassName: csi-snapshotter # Optional: VolumeSnapshotClass for CSI snapshots
+  volumeSnapshots:
+    enabled: true
+    snapshotClassName: csi-snapshotter # Optional: overrides persistence.volumeSnapshotClassName
+    schedule: '0 2 * * *' # Daily at 2 AM (cron format)
+    retentionCount: 7 # Keep last 7 snapshots
+    createNow: false # Set to true for immediate snapshot
+  apikey: 'true'
+  readApikey: 'true'

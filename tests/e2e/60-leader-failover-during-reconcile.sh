@@ -85,8 +85,8 @@ log_info "Verifying state converged correctly after failover..."
 sleep 10
 
 STATUS=$(kubectl get qdrantcluster my-cluster -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
-if [ "${STATUS}" != "Running" ] && [ "${STATUS}" != "Pending" ]; then
-  log_warn "⚠️ Cluster status is '${STATUS}' (expected Running or Pending)"
+if [ "${STATUS}" != "Running" ] && [ "${STATUS}" != "Healthy" ] && [ "${STATUS}" != "Pending" ] && [ "${STATUS}" != "OperationInProgress" ]; then
+  log_warn "⚠️ Cluster status is '${STATUS}' (expected Running, Healthy, Pending, or OperationInProgress)"
   # Don't fail - status might be updating
 fi
 

@@ -26,13 +26,13 @@ EOF
 wait_for_resource "statefulset" "rollout-test-cluster" "default" 60
 kubectl rollout status statefulset rollout-test-cluster -n default --timeout=120s
 
-log_info "Waiting for cluster to reach Running status..."
+log_info "Waiting for cluster to reach Running/Healthy status..."
 timeout=60
 elapsed=0
 while [ $elapsed -lt $timeout ]; do
   STATUS=$(kubectl get qdrantcluster rollout-test-cluster -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
-  if [ "${STATUS}" = "Running" ]; then
-    log_info "✅ Cluster is Running"
+  if [ "${STATUS}" = "Running" ] || [ "${STATUS}" = "Healthy" ]; then
+    log_info "✅ Cluster is ${STATUS}"
     break
   fi
   sleep 2
@@ -80,14 +80,14 @@ if [ "${rollout_started}" = "false" ]; then
   # Don't fail - might be idempotent update
 fi
 
-# Verify status is Pending during rollout (not Running)
+# Verify status is Pending or OperationInProgress during rollout (not Running/Healthy)
 log_info "Verifying status during rollout..."
-if [ "${STATUS}" = "Pending" ]; then
-  log_info "✅ Status is Pending during rollout (correct)"
-elif [ "${STATUS}" = "Running" ]; then
-  log_warn "⚠️ Status is already Running (rollout may have completed quickly)"
+if [ "${STATUS}" = "Pending" ] || [ "${STATUS}" = "OperationInProgress" ]; then
+  log_info "✅ Status is ${STATUS} during rollout (correct)"
+elif [ "${STATUS}" = "Running" ] || [ "${STATUS}" = "Healthy" ]; then
+  log_warn "⚠️ Status is already ${STATUS} (rollout may have completed quickly)"
 else
-  log_warn "⚠️ Status is '${STATUS}' (expected Pending or Running)"
+  log_warn "⚠️ Status is '${STATUS}' (expected Pending, OperationInProgress, Running, or Healthy)"
 fi
 
 # Wait for rollout to complete
@@ -100,11 +100,11 @@ kubectl rollout status statefulset rollout-test-cluster -n default --timeout=120
 
 log_info "✅ Rollout completed"
 
-# Verify status changes to Running only after pods are ready
-log_info "Verifying status transitions to Running after rollout..."
+# Verify status changes to Running/Healthy only after pods are ready
+log_info "Verifying status transitions to Running/Healthy after rollout..."
 timeout=60
 elapsed=0
-status_running=false
+status_ready=false
 
 while [ $elapsed -lt $timeout ]; do
   STATUS=$(kubectl get qdrantcluster rollout-test-cluster -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
@@ -112,14 +112,14 @@ while [ $elapsed -lt $timeout ]; do
   AVAILABLE_REPLICAS=$(kubectl get sts rollout-test-cluster -n default -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo "0")
   SPEC_REPLICAS=$(kubectl get sts rollout-test-cluster -n default -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
 
-  if [ "${STATUS}" = "Running" ]; then
-    # Verify pods are actually ready when status is Running
+  if [ "${STATUS}" = "Running" ] || [ "${STATUS}" = "Healthy" ]; then
+    # Verify pods are actually ready when status is Running/Healthy
     if [ "${READY_REPLICAS}" = "${SPEC_REPLICAS}" ] && [ "${AVAILABLE_REPLICAS}" = "${SPEC_REPLICAS}" ]; then
-      log_info "✅ Status is Running and all pods are ready (${READY_REPLICAS}/${SPEC_REPLICAS})"
-      status_running=true
+      log_info "✅ Status is ${STATUS} and all pods are ready (${READY_REPLICAS}/${SPEC_REPLICAS})"
+      status_ready=true
       break
     else
-      log_warn "⚠️ Status is Running but pods not all ready (${READY_REPLICAS}/${SPEC_REPLICAS})"
+      log_warn "⚠️ Status is ${STATUS} but pods not all ready (${READY_REPLICAS}/${SPEC_REPLICAS})"
       # This might indicate a bug, but don't fail immediately
     fi
   fi
@@ -128,8 +128,8 @@ while [ $elapsed -lt $timeout ]; do
   elapsed=$((elapsed + 2))
 done
 
-if [ "${status_running}" = "false" ]; then
-  log_warn "⚠️ Status did not transition to Running within timeout (current: ${STATUS})"
+if [ "${status_ready}" = "false" ]; then
+  log_warn "⚠️ Status did not transition to Running/Healthy within timeout (current: ${STATUS})"
   # Don't fail - might be updating
 fi
 

@@ -98,30 +98,33 @@ export const setCleanupStatus = async (
   setTimeout(() => settingStatus.delete(resourceKey), 300);
 };
 
-// Set the customresource status, clusters only at the moment
-export const setStatus = async (apiObj, status) => {
+// Set the customresource status with phase and optional conditions
+export const setStatusWithPhase = async (
+  apiObj,
+  phase,
+  conditions = null,
+  resourceType = 'cluster'
+) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
-  // add cluster key to the map of currently updating resources
   settingStatus.set(resourceKey, 'update');
 
-  // Retry logic for 409 conflicts (race conditions)
   const maxRetries = 3;
   let retries = 0;
 
   while (retries < maxRetries) {
     try {
-      // get current status
+      const plural =
+        resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
       const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
         group: 'qdrant.operator',
         version: 'v1alpha1',
         namespace: namespace,
-        plural: 'qdrantclusters',
+        plural: plural,
         name: name
       });
       const resCurrent = readObj;
-      // prepare new payload
       const newStatus = {
         apiVersion: apiObj.apiVersion,
         kind: apiObj.kind,
@@ -130,20 +133,21 @@ export const setStatus = async (apiObj, status) => {
           resourceVersion: resCurrent.metadata.resourceVersion
         },
         status: {
-          qdrantStatus: status
+          ...(resCurrent.status || {}),
+          qdrantStatus: phase,
+          ...(conditions && { conditions })
         }
       };
-      // set new status
+
       await k8sCustomApi.replaceNamespacedCustomObjectStatus({
         group: 'qdrant.operator',
         version: 'v1alpha1',
         namespace: namespace,
-        plural: 'qdrantclusters',
+        plural: plural,
         name: name,
         body: newStatus
       });
-      log(`The cluster "${name}" status now is ${status}.`);
-      // job is done, remove this resource from the map
+      log(`The ${resourceType} "${name}" status now is ${phase}.`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
 
       // Process any pending events that occurred during status update
@@ -154,11 +158,8 @@ export const setStatus = async (apiObj, status) => {
           `Processing ${events.length} pending event(s) for "${name}" that occurred during status update`
         );
 
-        // Import dynamically to avoid circular dependency
         const { onEventCluster } = await import('./events.js');
-        // Process events asynchronously (don't await to avoid blocking)
         for (const event of events) {
-          // Use setTimeout to ensure status update is fully complete
           setTimeout(async () => {
             try {
               await onEventCluster(event.phase, event.apiObj);
@@ -171,11 +172,10 @@ export const setStatus = async (apiObj, status) => {
         }
       }
 
-      return; // Success, exit retry loop
+      return;
     } catch (err) {
       const errorCode =
         err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
-      // If 409 Conflict (resource version changed), retry with fresh resourceVersion
       if (
         errorCode === 409 ||
         (err.message && err.message.includes('Conflict'))
@@ -185,7 +185,6 @@ export const setStatus = async (apiObj, status) => {
           log(
             `Status update conflict for "${name}", retrying (${retries}/${maxRetries})...`
           );
-          // Small delay before retry
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));
           continue;
         } else {
@@ -194,15 +193,47 @@ export const setStatus = async (apiObj, status) => {
           );
         }
       } else {
-        // Other errors, log and exit
         log(`Error updating status for "${name}": ${err.message}`);
         setTimeout(() => settingStatus.delete(resourceKey), 300);
         return;
       }
     }
   }
-  // If we get here, all retries failed
   setTimeout(() => settingStatus.delete(resourceKey), 300);
+};
+
+// Set the customresource status, clusters only at the moment
+// This is kept for backward compatibility, but now uses richer phases
+export const setStatus = async (apiObj, status) => {
+  // Map old status values to new phases
+  let phase = status;
+  if (status === 'Running') {
+    // Check if cluster is actually healthy (all replicas ready)
+    try {
+      const name = apiObj.metadata.name;
+      const namespace = apiObj.metadata.namespace;
+      const { k8sAppsApi } = await import('./k8s-client.js');
+      const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
+        name: name,
+        namespace: namespace
+      });
+      const sts = stsRes;
+      if (
+        sts.status?.availableReplicas >= sts.spec.replicas &&
+        sts.status?.updatedReplicas >= sts.spec.replicas &&
+        sts.status?.readyReplicas >= sts.spec.replicas
+      ) {
+        phase = 'Healthy';
+      } else {
+        phase = 'OperationInProgress';
+      }
+    } catch (err) {
+      // If we can't check, default to Running
+      phase = 'Running';
+    }
+  }
+
+  await setStatusWithPhase(apiObj, phase);
 };
 
 // Set error status with message (for invalid spec or other errors)

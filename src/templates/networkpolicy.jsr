@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{:metadata.name}}
+  namespace: {{:metadata.namespace}}
+  ownerReferences:
+  - apiVersion: {{:apiVersion}}
+    kind: {{:kind}}
+    name: {{:metadata.name}}
+    uid: {{:metadata.uid}}
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  podSelector:
+    matchLabels:
+      clustername: {{:metadata.name}}
+      component: qdrant
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from pods in the same namespace (client access)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 6333
+    - protocol: TCP
+      port: 6334
+  # Allow traffic from Qdrant pods (peer-to-peer for clustering)
+  - from:
+    - podSelector:
+        matchLabels:
+          clustername: {{:metadata.name}}
+          component: qdrant
+    ports:
+    - protocol: TCP
+      port: 6334
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow all egress (pods may need to reach external services for backups, etc.)
+  - {}
+

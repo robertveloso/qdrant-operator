@@ -7,6 +7,13 @@ source "${SCRIPT_DIR}/utils.sh"
 
 log_test "Happy Path: Verifying collection is accessible and healthy"
 
+# Verify NetworkPolicy was created (if supported)
+if kubectl get networkpolicy my-cluster -n default >/dev/null 2>&1; then
+  log_info "✅ NetworkPolicy created (network isolation enabled)"
+else
+  log_info "ℹ️ NetworkPolicy not found (may not be supported in this cluster)"
+fi
+
 POD=$(get_operator_pod)
 log_info "Using operator pod: ${POD}"
 

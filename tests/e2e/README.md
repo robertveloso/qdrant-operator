@@ -157,8 +157,9 @@ Valida que updates de spec geram rollouts controlados e status correto.
 **O que testa:**
 
 - Rollout é iniciado quando spec muda
-- Status permanece `Pending` durante rollout
-- Status muda para `Running` apenas quando pods estão prontos
+- Status permanece `Pending` ou `OperationInProgress` durante rollout
+- Status muda para `Running` ou `Healthy` apenas quando pods estão prontos
+- `Healthy` indica que todos os replicas estão prontos e disponíveis
 - Não há rollouts infinitos
 - Geração do StatefulSet aumenta (indica rollout)
 

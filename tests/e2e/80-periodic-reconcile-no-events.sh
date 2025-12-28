@@ -15,14 +15,14 @@ kubectl rollout status statefulset my-cluster -n default --timeout=120s
 
 log_info "Cluster created and ready"
 
-# Wait for cluster to be Running
-log_info "Waiting for cluster to reach Running status..."
+# Wait for cluster to be Running or Healthy
+log_info "Waiting for cluster to reach Running/Healthy status..."
 timeout=60
 elapsed=0
 while [ $elapsed -lt $timeout ]; do
   STATUS=$(kubectl get qdrantcluster my-cluster -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
-  if [ "${STATUS}" = "Running" ]; then
-    log_info "✅ Cluster is Running"
+  if [ "${STATUS}" = "Running" ] || [ "${STATUS}" = "Healthy" ]; then
+    log_info "✅ Cluster is ${STATUS}"
     break
   fi
   sleep 2
@@ -88,8 +88,8 @@ fi
 
 # Verify cluster status is still correct
 STATUS=$(kubectl get qdrantcluster my-cluster -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
-if [ "${STATUS}" != "Running" ] && [ "${STATUS}" != "Pending" ]; then
-  log_warn "⚠️ Cluster status is '${STATUS}' (expected Running or Pending)"
+if [ "${STATUS}" != "Running" ] && [ "${STATUS}" != "Healthy" ] && [ "${STATUS}" != "Pending" ] && [ "${STATUS}" != "OperationInProgress" ]; then
+  log_warn "⚠️ Cluster status is '${STATUS}' (expected Running, Healthy, Pending, or OperationInProgress)"
   # Don't fail - status might be updating
 fi
 

@@ -66,8 +66,17 @@ export const waitForClusterReadiness = (apiObj) => {
         statefulSetWatchRequests.delete(resourceKey);
         statefulSetWatchAborted.delete(resourceKey);
         statefulSetLastReadinessStatus.delete(resourceKey);
-        // set resource status to Running
-        await setStatus(apiObj, 'Running');
+        // set resource status to Healthy (all replicas ready)
+        const { setStatusWithPhase } = await import('./status.js');
+        await setStatusWithPhase(apiObj, 'Healthy', [
+          {
+            type: 'Ready',
+            status: 'True',
+            lastTransitionTime: new Date().toISOString(),
+            reason: 'AllReplicasReady',
+            message: `All ${stset.spec.replicas} replicas are ready and available`
+          }
+        ]);
         // memorize this resourceversion
         await updateResourceVersion(apiObj);
       } else {
@@ -162,7 +171,16 @@ export const waitForClusterReadiness = (apiObj) => {
             statefulSetWatchRequests.delete(resourceKey);
             statefulSetWatchAborted.delete(resourceKey);
             statefulSetLastReadinessStatus.delete(resourceKey);
-            await setStatus(apiObj, 'Running');
+            const { setStatusWithPhase } = await import('./status.js');
+            await setStatusWithPhase(apiObj, 'Healthy', [
+              {
+                type: 'Ready',
+                status: 'True',
+                lastTransitionTime: new Date().toISOString(),
+                reason: 'AllReplicasReady',
+                message: `All ${stset.spec.replicas} replicas are ready and available`
+              }
+            ]);
             await updateResourceVersion(apiObj);
           } else {
             // Only log readiness status changes in polling mode too (reduces log noise)

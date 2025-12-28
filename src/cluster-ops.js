@@ -383,3 +383,51 @@ export const applyPdbCluster = async (apiObj, k8sPolicyApi) => {
     log(err);
   }
 };
+
+// create NetworkPolicy for cluster isolation
+export const applyNetworkPolicyCluster = async (apiObj, k8sNetworkingApi) => {
+  const name = apiObj.metadata.name;
+  const namespace = apiObj.metadata.namespace;
+  const newNetworkPolicyTemplate = genericTemplate(apiObj, 'networkpolicy.jsr');
+
+  try {
+    const res = await k8sNetworkingApi.readNamespacedNetworkPolicy({
+      name: name,
+      namespace: namespace
+    });
+    log(`NetworkPolicy "${name}" already exists!`);
+    // Update if needed (idempotent)
+    try {
+      await k8sNetworkingApi.replaceNamespacedNetworkPolicy({
+        name: name,
+        namespace: namespace,
+        body: newNetworkPolicyTemplate
+      });
+      log(`NetworkPolicy "${name}" was successfully updated!`);
+    } catch (err) {
+      // Ignore update errors if policy is already correct
+      if (!err.message?.includes('not found')) {
+        log(`Note: Could not update NetworkPolicy "${name}": ${err.message}`);
+      }
+    }
+    return;
+  } catch (err) {
+    log(`NetworkPolicy "${name}" is not available. Creating...`);
+  }
+  try {
+    await k8sNetworkingApi.createNamespacedNetworkPolicy({
+      namespace: namespace,
+      body: newNetworkPolicyTemplate
+    });
+    log(`NetworkPolicy "${name}" was successfully created!`);
+  } catch (err) {
+    // NetworkPolicy might not be supported in all clusters - log but don't fail
+    if (err.message?.includes('not found') || err.statusCode === 404) {
+      log(
+        `Note: NetworkPolicy not supported in this cluster, skipping creation.`
+      );
+    } else {
+      log(`Warning: Could not create NetworkPolicy "${name}": ${err.message}`);
+    }
+  }
+};

@@ -29,6 +29,27 @@ The operator provides the following functionality:
 - The operator works in cluster mode with leader elections, ensuring high availability.
 - The operator allows to create instant and scheduled snapshots and store them in any S3-compatible storage.
 
+## 🎯 Design Philosophy
+
+This operator is a **Kubernetes-native Qdrant database operator**, focused on lifecycle management using standard Kubernetes resources. It is designed to be:
+
+- **Simple and predictable**: Uses standard Kubernetes patterns (StatefulSets, Services, PVCs)
+- **Self-contained**: No external control-plane dependencies; everything runs within your cluster
+- **Kubernetes-native**: Leverages K8s primitives and follows Kubernetes best practices
+- **User-controlled**: Users configure resources, scheduling, and scaling; the operator applies the desired state
+
+### How it differs from Qdrant Cloud Operator
+
+The Qdrant Cloud Operator includes a SaaS control-plane with features like automatic shard rebalancing, billing, and SLA enforcement. This operator focuses on **database lifecycle management** within Kubernetes, leaving advanced orchestration to the user or external tools.
+
+**Key differences**:
+
+- **This operator**: Self-hosted, Kubernetes-native, full user control
+- **Cloud Operator**: SaaS-managed, cloud control-plane, automated orchestration
+
+For detailed scope and design decisions, see [SCOPE.md](docs/SCOPE.md).
+For a feature-by-feature comparison, see [Comparison with Qdrant Cloud Operator](docs/comparison.md).
+
 ### 🔨 Installation
 
 To run the operator you need Kubernetes version 1.26+.
@@ -215,7 +236,12 @@ The demo application does not rely on paid APIs from well-known services (such a
 
 ### 📖 Documentation
 
-Guides:
+**Design and Scope**:
+
+- [Scope and Design Decisions](docs/SCOPE.md) - What this operator does and doesn't do, and why
+- [Comparison with Qdrant Cloud Operator](docs/comparison.md) - Feature-by-feature comparison
+
+**Guides**:
 
 - [TLS usage](docs/tls.md)
 - [Authentication](docs/authentication.md)
@@ -252,4 +278,4 @@ This project is licensed under the [MIT](./LICENSE) license.
 
 Please note that the Qdrant operator currently is under development and new releases might contain bugs and breaking changes. The operator is not affiliated with [Qdrant](https://github.com/qdrant/).
 
-This is based on https://github.com/ganochenkodg/qdrant-operator which was no longer updated
+This is based on https://github.com/robertveloso/qdrant-operator which was no longer updated
