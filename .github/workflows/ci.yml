@@ -119,6 +119,13 @@ jobs:
             exit 1
           }
 
+          echo "📋 Verifying environment variables in pod..."
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
+          echo "   POD_NAME: ${POD_NAME}"
+          kubectl exec -n qdrant-operator ${POD_NAME} -- env | grep -E "POD_NAME|POD_NAMESPACE" || {
+            echo "⚠️ Warning: Could not verify environment variables"
+          }
+
           echo "📋 Getting operator logs..."
           kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
       - name: Integration test

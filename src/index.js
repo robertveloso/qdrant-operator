@@ -18,17 +18,8 @@ import {
   applyJobs
 } from './collection-ops.js';
 
-// use Kubernetes Leases for leader election
-const lock = new K8SLock({
-  leaseName: 'qdrant-operator',
-  namespace: process.env.POD_NAMESPACE,
-  lockLeaserId: process.env.POD_NAME,
-  waitUntilLock: true,
-  createLeaseIfNotExist: true,
-  leaseDurationInSeconds: 30,
-  refreshLockInterval: 5000,
-  lockTryInterval: 5000
-});
+// Kubernetes Leases for leader election (initialized in main() after env validation)
+let lock = null;
 
 // set debug mode, false by default
 const debugMode = process.env.DEBUG_MODE || 'false';
@@ -200,6 +191,10 @@ const watchResource = async () => {
   // Check if we're still the leader before starting watch
   try {
     const namespace = process.env.POD_NAMESPACE;
+    if (!namespace) {
+      log('❌ ERROR: POD_NAMESPACE not set, cannot start watch');
+      return;
+    }
     const res = await k8sCoordinationApi.readNamespacedLease(
       'qdrant-operator',
       namespace
@@ -308,6 +303,10 @@ const updateResourceVersion = async (apiObj, k8sCustomApi) => {
 // check the current leader
 const isLeader = async () => {
   const namespace = process.env.POD_NAMESPACE;
+  if (!namespace) {
+    log('❌ ERROR: POD_NAMESPACE not set, cannot check leader status');
+    return;
+  }
   try {
     const res = await k8sCoordinationApi.readNamespacedLease(
       'qdrant-operator',
@@ -393,15 +392,46 @@ const applyNow = async (apiObj) => {
 };
 
 const main = async () => {
+  // Validate required environment variables
+  if (!process.env.POD_NAMESPACE) {
+    log('❌ ERROR: POD_NAMESPACE environment variable is not set!');
+    log('   The operator requires POD_NAMESPACE to be set via downward API.');
+    process.exit(1);
+  }
+  if (!process.env.POD_NAME) {
+    log('❌ ERROR: POD_NAME environment variable is not set!');
+    log('   The operator requires POD_NAME to be set via downward API.');
+    process.exit(1);
+  }
+
+  // Initialize Kubernetes Leases for leader election (after env validation)
+  lock = new K8SLock({
+    leaseName: 'qdrant-operator',
+    namespace: process.env.POD_NAMESPACE,
+    lockLeaserId: process.env.POD_NAME,
+    waitUntilLock: true,
+    createLeaseIfNotExist: true,
+    leaseDurationInSeconds: 30,
+    refreshLockInterval: 5000,
+    lockTryInterval: 5000
+  });
+
   // leader election using k8s leases
   log(
     `Status of "${process.env.POD_NAME}": FOLLOWER. Trying to get leader status...`
   );
+  log(`   Namespace: ${process.env.POD_NAMESPACE}`);
 
   // Start periodic logging for followers while waiting
   let followerLogInterval = setInterval(async () => {
     try {
       const namespace = process.env.POD_NAMESPACE;
+      if (!namespace) {
+        log(
+          `Status of "${process.env.POD_NAME}": FOLLOWER. POD_NAMESPACE not set, cannot check leader status.`
+        );
+        return;
+      }
       const res = await k8sCoordinationApi.readNamespacedLease(
         'qdrant-operator',
         namespace
@@ -417,13 +447,17 @@ const main = async () => {
         );
       }
     } catch (err) {
-      log(
-        `Status of "${process.env.POD_NAME}": FOLLOWER. Checking leader status... (error: ${err.message})`
-      );
+      const errorMsg = err.message || String(err);
+      // Don't log 404 errors as they're expected when lease doesn't exist yet
+      if (!errorMsg.includes('404') && !errorMsg.includes('not found')) {
+        log(
+          `Status of "${process.env.POD_NAME}": FOLLOWER. Checking leader status... (error: ${errorMsg})`
+        );
+      }
     }
   }, 10000); // Log every 10 seconds
 
-  const lockInfo = await lock.startLocking();
+  await lock.startLocking();
 
   // Clear the follower logging interval once we become leader
   clearInterval(followerLogInterval);
@@ -451,7 +485,9 @@ if (debugMode == 'true') {
 
 // got SIGTERM - stop locking and exit
 process.on('SIGTERM', async () => {
-  await lock.stopLocking();
+  if (lock) {
+    await lock.stopLocking();
+  }
   log('Stopping gracefully...');
   process.exit(0);
 });
