@@ -29,7 +29,7 @@ import {
   applyJobs,
   getConnectionParameters
 } from './collection-ops.js';
-import { setStatus, updateResourceVersion } from './status.js';
+import { setStatus, updateResourceVersion, setErrorStatus } from './status.js';
 import { calculateSpecHash, updateLastAppliedHash } from './spec-hash.js';
 import { waitForClusterReadiness } from './readiness.js';
 import {
@@ -144,14 +144,58 @@ export const scheduleApplying = (apiObj) => {
   scheduleReconcile(apiObj, 'cluster');
 };
 
+// Validate cluster spec
+const validateClusterSpec = (spec) => {
+  if (!spec) {
+    return 'Spec is required';
+  }
+  if (typeof spec.replicas !== 'undefined' && spec.replicas < 1) {
+    return `Invalid replicas: ${spec.replicas}. Must be >= 1`;
+  }
+  if (!spec.image || spec.image.trim() === '') {
+    return 'Image is required and cannot be empty';
+  }
+  return null; // Valid
+};
+
+// Validate collection spec
+const validateCollectionSpec = (spec) => {
+  if (!spec) {
+    return 'Spec is required';
+  }
+  if (!spec.cluster || spec.cluster.trim() === '') {
+    return 'Cluster name is required';
+  }
+  if (typeof spec.vectorSize !== 'number' || spec.vectorSize < 1) {
+    return `Invalid vectorSize: ${spec.vectorSize}. Must be >= 1`;
+  }
+  if (typeof spec.shardNumber !== 'undefined' && spec.shardNumber < 1) {
+    return `Invalid shardNumber: ${spec.shardNumber}. Must be >= 1`;
+  }
+  if (
+    typeof spec.replicationFactor !== 'undefined' &&
+    spec.replicationFactor < 1
+  ) {
+    return `Invalid replicationFactor: ${spec.replicationFactor}. Must be >= 1`;
+  }
+  return null; // Valid
+};
+
 // Declarative reconciliation: compare desired (CR spec) vs observed (actual state)
 export const reconcileCluster = async (apiObj) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
 
-  // Get desired state from CR spec
+  // Validate spec before proceeding
   const desired = apiObj.spec;
+  const validationError = validateClusterSpec(desired);
+  if (validationError) {
+    log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
+    await setErrorStatus(apiObj, validationError, 'cluster');
+    errorsTotal.inc({ type: 'validation' });
+    return; // Don't proceed with reconciliation
+  }
 
   // Get observed state from cache (fast read) with API fallback (source of truth)
   // Cache is used for performance, but API is always checked for critical decisions
@@ -335,14 +379,17 @@ export const reconcileCollection = async (apiObj) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
-  const clusterName = apiObj.spec?.cluster;
 
-  if (!clusterName) {
-    log(
-      `❌ Collection "${name}" has no cluster specified in spec.cluster. Cannot reconcile.`
-    );
-    return;
+  // Validate spec before proceeding
+  const validationError = validateCollectionSpec(apiObj.spec);
+  if (validationError) {
+    log(`❌ Invalid spec for collection "${name}": ${validationError}`);
+    await setErrorStatus(apiObj, validationError, 'collection');
+    errorsTotal.inc({ type: 'validation' });
+    return; // Don't proceed with reconciliation
   }
+
+  const clusterName = apiObj.spec?.cluster;
 
   log(
     `🔄 Starting reconciliation for collection "${name}" in namespace "${namespace}" (cluster: "${clusterName}")`

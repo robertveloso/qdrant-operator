@@ -82,7 +82,7 @@ Este teste cobre o pior cenário real de operator - deleção durante atividade.
 
 **Nota:** Este teste cria um novo cluster e collection, pois o teste anterior (`40-finalizer.sh`) deleta os recursos.
 
-### `50-leader-failover.sh` - Leader Failover (Opcional)
+### `50-leader-failover.sh` - Leader Failover
 
 Testa o comportamento de alta disponibilidade quando o pod leader é deletado.
 
@@ -92,7 +92,101 @@ Testa o comportamento de alta disponibilidade quando o pod leader é deletado.
 - Novo leader é eleito automaticamente
 - Operator continua funcionando após failover
 
-**Nota:** Este teste está desabilitado por padrão no CI, mas pode ser habilitado se necessário.
+### `60-leader-failover-during-reconcile.sh` - Leader Failover Durante Reconcile
+
+Valida comportamento de alta disponibilidade quando o leader é deletado durante reconciliação ativa.
+
+**O que testa:**
+
+- Novo líder é eleito rapidamente durante reconcile ativo
+- Reconcile é completado corretamente após failover
+- StatefulSet não fica em estado inconsistente
+- Nenhum recurso órfão é criado
+- Não há split-brain ou apply parcial
+
+**Por que é importante:**
+
+Este é o cenário mais perigoso de failover - quando o leader morre no meio de uma operação. Garante que `activeReconciles` funciona e que não há corrupção de estado.
+
+### `70-invalid-spec.sh` - Spec Inválida
+
+Valida que o operator lida graciosamente com specs inválidas sem crashar.
+
+**O que testa:**
+
+- Operator não crasha com spec inválida
+- Status do CR fica `Error` com mensagem clara
+- Nenhum recurso é criado com spec inválida
+- Mensagem de erro é informativa
+
+**O que valida:**
+
+- `replicas < 1` → erro
+- `image` vazio → erro
+- `vectorSize < 1` (collections) → erro
+
+**Por que é importante:**
+
+Diferencia operator maduro de "controller frágil". Em produção, usuários podem criar specs inválidas acidentalmente.
+
+### `80-periodic-reconcile-no-events.sh` - Reconciliação Periódica Sem Eventos
+
+Valida que a reconciliação periódica funciona mesmo quando eventos de watch são perdidos.
+
+**O que testa:**
+
+- Reconciliação periódica detecta drift sem eventos de watch
+- Estado é restaurado mesmo após perda de eventos
+- Operator não depende cegamente de watch
+
+**Cenário:**
+
+1. Cria cluster
+2. Escala StatefulSet manualmente (drift)
+3. Aguarda reconciliação periódica (30s)
+4. Verifica que estado é restaurado
+
+**Por que é importante:**
+
+Garante que o safety net funciona. Em produção, watches podem ser perdidos temporariamente (API server restart, network issues).
+
+### `90-spec-update-rollout.sh` - Update de Spec com Rollout Controlado
+
+Valida que updates de spec geram rollouts controlados e status correto.
+
+**O que testa:**
+
+- Rollout é iniciado quando spec muda
+- Status permanece `Pending` durante rollout
+- Status muda para `Running` apenas quando pods estão prontos
+- Não há rollouts infinitos
+- Geração do StatefulSet aumenta (indica rollout)
+
+**Por que é importante:**
+
+Garante que updates são seguros e controlados. Valida que hash comparison funciona e que status reflete estado real.
+
+### `100-delete-partial-cleanup.sh` - Delete com Cleanup Parcial
+
+Valida que cleanup é idempotente quando recursos já foram parcialmente removidos.
+
+**O que testa:**
+
+- Finalizer não falha quando StatefulSet já foi deletado
+- Cleanup é idempotente (pode ser chamado múltiplas vezes)
+- Operator não assume estado perfeito
+- CR é deletado com sucesso mesmo com recursos parcialmente removidos
+
+**Cenário:**
+
+1. Cria cluster
+2. Deleta StatefulSet manualmente (simula falha parcial)
+3. Deleta CR (aciona finalizer)
+4. Verifica que finalizer lida graciosamente
+
+**Por que é importante:**
+
+Em produção, recursos podem ser deletados manualmente ou por outros processos. O operator deve lidar com isso graciosamente.
 
 ## 🚀 Como Executar
 
@@ -112,7 +206,12 @@ chmod +x *.sh
 ./30-idempotency.sh
 ./40-finalizer.sh
 ./41-finalizer-under-load.sh
-# ./50-leader-failover.sh  # opcional
+./50-leader-failover.sh
+./60-leader-failover-during-reconcile.sh
+./70-invalid-spec.sh
+./80-periodic-reconcile-no-events.sh
+./90-spec-update-rollout.sh
+./100-delete-partial-cleanup.sh
 ```
 
 ### No CI/CD
@@ -123,15 +222,20 @@ Os testes são executados automaticamente no GitHub Actions no job `integration-
 
 ```
 tests/e2e/
-├── README.md              # Esta documentação
-├── utils.sh               # Funções utilitárias compartilhadas
-├── 00-setup.sh            # Setup inicial
-├── 10-happy-path.sh       # Happy path
-├── 20-drift.sh            # Drift detection
-├── 30-idempotency.sh      # Idempotência
-├── 40-finalizer.sh        # Finalizer e cleanup
-├── 41-finalizer-under-load.sh  # Finalizer sob carga
-└── 50-leader-failover.sh  # Leader failover (opcional)
+├── README.md                        # Esta documentação
+├── utils.sh                         # Funções utilitárias compartilhadas
+├── 00-setup.sh                      # Setup inicial
+├── 10-happy-path.sh                 # Happy path
+├── 20-drift.sh                      # Drift detection
+├── 30-idempotency.sh                # Idempotência
+├── 40-finalizer.sh                  # Finalizer e cleanup
+├── 41-finalizer-under-load.sh       # Finalizer sob carga
+├── 50-leader-failover.sh            # Leader failover
+├── 60-leader-failover-during-reconcile.sh  # Leader failover durante reconcile
+├── 70-invalid-spec.sh               # Spec inválida
+├── 80-periodic-reconcile-no-events.sh  # Reconciliação periódica sem eventos
+├── 90-spec-update-rollout.sh        # Update de spec com rollout
+└── 100-delete-partial-cleanup.sh    # Delete com cleanup parcial
 ```
 
 ## 🔧 Utilitários (`utils.sh`)
@@ -153,7 +257,12 @@ Um operator confiável deve passar em todos estes testes:
 3. ✅ **Idempotência**: Não causa rollouts desnecessários
 4. ✅ **Finalizer Sob Carga**: Cleanup funciona durante atividade
 5. ✅ **Finalizers**: Cleanup adequado
-6. ✅ **HA** (opcional): Failover funciona
+6. ✅ **HA**: Failover funciona
+7. ✅ **HA Durante Reconcile**: Failover funciona durante operações ativas
+8. ✅ **Spec Inválida**: Lida graciosamente com inputs inválidos
+9. ✅ **Reconciliação Periódica**: Safety net funciona sem eventos
+10. ✅ **Rollout Controlado**: Updates são seguros e controlados
+11. ✅ **Cleanup Idempotente**: Lida com estado parcial
 
 > **Regra de Ouro**: Se seu operator passa nesses testes, ele é confiável em produção.
 

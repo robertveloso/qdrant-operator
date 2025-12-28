@@ -183,8 +183,23 @@ jobs:
           # scenario: deletion while cluster is under active use.
           tests/e2e/41-finalizer-under-load.sh
 
-          # Leader failover: Verify HA behavior (optional, can be enabled if needed)
-          # tests/e2e/50-leader-failover.sh
+          # Leader failover: Verify HA behavior
+          tests/e2e/50-leader-failover.sh
+
+          # Leader failover during reconcile: Verify HA during active operations
+          tests/e2e/60-leader-failover-during-reconcile.sh
+
+          # Invalid spec: Verify graceful handling of invalid specs
+          tests/e2e/70-invalid-spec.sh
+
+          # Periodic reconcile: Verify safety net works without watch events
+          tests/e2e/80-periodic-reconcile-no-events.sh
+
+          # Spec update rollout: Verify controlled rollouts on spec changes
+          tests/e2e/90-spec-update-rollout.sh
+
+          # Delete partial cleanup: Verify idempotent cleanup
+          tests/e2e/100-delete-partial-cleanup.sh
 
           echo ""
           echo "✅ All E2E tests passed!"

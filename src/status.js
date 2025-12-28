@@ -205,6 +205,79 @@ export const setStatus = async (apiObj, status) => {
   setTimeout(() => settingStatus.delete(resourceKey), 300);
 };
 
+// Set error status with message (for invalid spec or other errors)
+export const setErrorStatus = async (
+  apiObj,
+  errorMessage,
+  resourceType = 'cluster'
+) => {
+  const name = apiObj.metadata.name;
+  const namespace = apiObj.metadata.namespace;
+  const resourceKey = `${namespace}/${name}`;
+  settingStatus.set(resourceKey, 'update');
+
+  const maxRetries = 3;
+  let retries = 0;
+
+  while (retries < maxRetries) {
+    try {
+      const plural =
+        resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
+      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: plural,
+        name: name
+      });
+      const resCurrent = readObj;
+      const newStatus = {
+        apiVersion: apiObj.apiVersion,
+        kind: apiObj.kind,
+        metadata: {
+          name: apiObj.metadata.name,
+          resourceVersion: resCurrent.metadata.resourceVersion
+        },
+        status: {
+          ...(resCurrent.status || {}),
+          qdrantStatus: 'Error',
+          errorMessage: errorMessage
+        }
+      };
+
+      await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: plural,
+        name: name,
+        body: newStatus
+      });
+      log(`Set error status for ${resourceType} "${name}": ${errorMessage}`);
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
+    } catch (err) {
+      const errorCode =
+        err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+      if (
+        errorCode === 409 ||
+        (err.message && err.message.includes('Conflict'))
+      ) {
+        retries++;
+        if (retries < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * retries));
+          continue;
+        }
+      } else {
+        log(`Error setting error status for "${name}": ${err.message}`);
+        setTimeout(() => settingStatus.delete(resourceKey), 300);
+        return;
+      }
+    }
+  }
+  setTimeout(() => settingStatus.delete(resourceKey), 300);
+};
+
 // Update the version of last caught cluster
 export const updateResourceVersion = async (apiObj) => {
   const name = apiObj.metadata.name;

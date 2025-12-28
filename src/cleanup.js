@@ -68,7 +68,7 @@ export const cleanupCluster = async (apiObj) => {
         statefulSetLastReadinessStatus.delete(resourceKey);
       }
 
-      // Scale down StatefulSet to 0 replicas gracefully
+      // Scale down StatefulSet to 0 replicas gracefully (idempotent)
       try {
         const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
           name: name,
@@ -96,9 +96,19 @@ export const cleanupCluster = async (apiObj) => {
           );
           // Wait a bit for graceful shutdown
           await new Promise((resolve) => setTimeout(resolve, 2000));
+        } else {
+          log(
+            `StatefulSet "${name}" already scaled to 0 replicas (idempotent cleanup)`
+          );
         }
       } catch (err) {
-        if (!err.message.includes('not found')) {
+        // StatefulSet not found is acceptable - cleanup is idempotent
+        if (err.message.includes('not found') || err.code === 404) {
+          log(
+            `StatefulSet "${name}" not found - already deleted (idempotent cleanup)`
+          );
+          // Continue with cleanup - this is expected if StatefulSet was already deleted
+        } else {
           log(`Error scaling down StatefulSet "${name}": ${err.message}`);
           throw err; // Re-throw to trigger retry
         }
