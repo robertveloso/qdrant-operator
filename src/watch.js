@@ -403,6 +403,9 @@ export const watchResource = async () => {
   collectionWatchAborted.value = false;
 
   // Start required watches (always recreate since we abort existing ones above)
+  const isFirstClusterWatch = !clusterWatchRequest.value;
+  const isFirstCollectionWatch = !collectionWatchRequest.value;
+
   if (!clusterWatchRequest.value) {
     try {
       clusterWatchRequest.value = watch.watch(
@@ -437,6 +440,67 @@ export const watchResource = async () => {
       errorsTotal.inc({ type: 'watch_start' });
     }
   }
+
+  // Initial listing: Process existing resources when watch starts for the first time
+  // This ensures we don't miss resources created before the watch was established
+  if (isFirstClusterWatch || isFirstCollectionWatch) {
+    try {
+      // List and process existing clusters
+      if (isFirstClusterWatch) {
+        try {
+          const clusterList = await k8sCustomApi.listNamespacedCustomObject({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: '',
+            plural: 'qdrantclusters'
+          });
+          log(`Found ${clusterList.items.length} existing cluster(s), processing...`);
+          for (const cluster of clusterList.items) {
+            const resourceKey = `${cluster.metadata.namespace}/${cluster.metadata.name}`;
+            // Skip if deletion is in progress
+            if (cluster.metadata.deletionTimestamp) {
+              continue;
+            }
+            // Update cache
+            clusterCache.set(resourceKey, cluster);
+            // Reconcile to ensure state is correct
+            scheduleReconcile(cluster, 'cluster');
+          }
+        } catch (listErr) {
+          log(`Error listing clusters on initial watch: ${listErr.message}`);
+        }
+      }
+
+      // List and process existing collections
+      if (isFirstCollectionWatch) {
+        try {
+          const collectionList = await k8sCustomApi.listNamespacedCustomObject({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: '',
+            plural: 'qdrantcollections'
+          });
+          log(`Found ${collectionList.items.length} existing collection(s), processing...`);
+          for (const collection of collectionList.items) {
+            const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+            // Skip if deletion is in progress
+            if (collection.metadata.deletionTimestamp) {
+              continue;
+            }
+            // Update cache
+            collectionCache.set(resourceKey, collection);
+            // Reconcile to ensure it exists in Qdrant
+            scheduleReconcile(collection, 'collection');
+          }
+        } catch (listErr) {
+          log(`Error listing collections on initial watch: ${listErr.message}`);
+        }
+      }
+    } catch (err) {
+      log(`Error in initial resource listing: ${err.message}`);
+    }
+  }
+
   // Note: watch.watch() doesn't return a Promise, it starts the watch in the background
   // The callbacks (onEventCluster, onEventCollection) will be called when events occur
 };
