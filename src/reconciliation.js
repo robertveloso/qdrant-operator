@@ -10,7 +10,8 @@ import {
   statefulSetCache,
   collectionCache,
   shuttingDown,
-  activeReconciles
+  activeReconciles,
+  retryQueue
 } from './state.js';
 import {
   applyCluster,
@@ -25,7 +26,8 @@ import {
 import {
   createCollection,
   updateCollection,
-  applyJobs
+  applyJobs,
+  getConnectionParameters
 } from './collection-ops.js';
 import { setStatus, updateResourceVersion } from './status.js';
 import { calculateSpecHash, updateLastAppliedHash } from './spec-hash.js';
@@ -36,6 +38,37 @@ import {
   reconcileQueueDepth
 } from './metrics.js';
 import { log } from './utils.js';
+
+// Schedule retry with persistent queue (survives reconnections)
+const scheduleRetry = (apiObj, resourceType, delay = 5000, retryCount = 0) => {
+  const resourceKey = `${apiObj.metadata.namespace}/${apiObj.metadata.name}`;
+  const retryKey = `retry-${resourceKey}`;
+
+  // Cancel existing retry if any
+  if (retryQueue.has(retryKey)) {
+    clearTimeout(retryQueue.get(retryKey).timeoutId);
+  }
+
+  const timeoutId = setTimeout(() => {
+    retryQueue.delete(retryKey);
+    log(
+      `🔄 Executing retry for ${resourceType} "${apiObj.metadata.name}" (attempt ${retryCount + 1})...`
+    );
+    scheduleReconcile(apiObj, resourceType);
+  }, delay);
+
+  retryQueue.set(retryKey, {
+    apiObj,
+    resourceType,
+    retryCount: retryCount + 1,
+    scheduledAt: Date.now(),
+    timeoutId
+  });
+
+  log(
+    `⏰ Scheduled retry for ${resourceType} "${apiObj.metadata.name}" in ${delay / 1000}s (queue size: ${retryQueue.size})`
+  );
+};
 
 // Schedule reconciliation (declarative model - replaces scheduleApplying)
 export const scheduleReconcile = (apiObj, resourceType) => {
@@ -51,12 +84,12 @@ export const scheduleReconcile = (apiObj, resourceType) => {
   // If already scheduled for this resource, skip (prevents duplicate processing)
   if (applyQueue.has(resourceKey)) {
     log(
-      `Reconciliation already scheduled for ${resourceType} "${name}", skipping...`
+      `⏭️ Reconciliation already scheduled for ${resourceType} "${name}", skipping... (queue size: ${applyQueue.size})`
     );
     return;
   }
   log(
-    `Scheduling reconciliation for ${resourceType} "${name}" in namespace "${namespace}"`
+    `📅 Scheduling reconciliation for ${resourceType} "${name}" in namespace "${namespace}" (queue size before: ${applyQueue.size}, retry queue size: ${retryQueue.size})`
   );
   // Schedule reconcile with debounce (1 second delay)
   const timeout = setTimeout(async () => {
@@ -72,12 +105,17 @@ export const scheduleReconcile = (apiObj, resourceType) => {
 
     applyQueue.delete(resourceKey);
     reconcileQueueDepth.set(applyQueue.size); // Update queue depth metric
+    log(
+      `📊 Queue state: applyQueue size=${applyQueue.size}, retryQueue size=${retryQueue.size}, activeReconciles=${activeReconciles.size}`
+    );
 
     // Mark as active reconcile
     activeReconciles.add(resourceKey);
 
     try {
-      log(`🚀 Starting reconciliation for ${resourceType} "${name}"...`);
+      log(
+        `🚀 Starting reconciliation for ${resourceType} "${name}"... (active reconciles: ${activeReconciles.size})`
+      );
       if (resourceType === 'cluster') {
         await reconcileCluster(apiObj);
       } else if (resourceType === 'collection') {
@@ -368,112 +406,150 @@ export const reconcileCollection = async (apiObj) => {
         );
       }
       // Cluster might not exist yet or API error - schedule retry
-      log(
-        `⏰ Scheduling retry in 5 seconds due to cluster status check error...`
-      );
-      setTimeout(() => {
-        log(
-          `🔄 Retrying reconciliation for collection "${name}" after cluster status check error...`
-        );
-        scheduleReconcile(currentCollection, 'collection');
-      }, 5000); // Retry in 5 seconds (reduced from 10s)
+      scheduleRetry(currentCollection, 'collection', 5000, 0);
       return;
     }
 
-    // If cluster is not ready, schedule a retry with detailed debug info
+    // If cluster is not ready, check StatefulSet directly as fallback
+    // Status may be stale even when StatefulSet is actually ready
     if (clusterStatus !== 'Running') {
-      log(
-        `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}). Collection "${name}" will be created when cluster is ready.`
-      );
-
-      // Debug: Get detailed cluster and StatefulSet information
+      // Verificar StatefulSet diretamente como fallback
+      let stsReady = false;
       try {
-        const clusterObj = await k8sCustomApi.getNamespacedCustomObject({
-          group: 'qdrant.operator',
-          version: 'v1alpha1',
-          namespace: namespace,
-          plural: 'qdrantclusters',
-          name: clusterName
+        const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
+          name: clusterName,
+          namespace: namespace
         });
-        log(
-          `🔍 Debug Cluster "${clusterName}": status=${clusterStatus || 'unknown'}, spec.replicas=${clusterObj.spec?.replicas || 'undefined'}, spec.image=${clusterObj.spec?.image || 'undefined'}`
-        );
+        const sts = stsRes;
+        stsReady =
+          sts.status?.availableReplicas >= sts.spec?.replicas &&
+          sts.status?.updatedReplicas >= sts.spec?.replicas;
 
-        // Check StatefulSet status
-        try {
-          const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
-            name: clusterName,
-            namespace: namespace
-          });
-          const sts = stsRes;
+        if (stsReady && clusterStatus !== 'Running') {
           log(
-            `🔍 Debug StatefulSet "${clusterName}": replicas=${sts.spec?.replicas || 'undefined'}, readyReplicas=${sts.status?.readyReplicas || 0}, availableReplicas=${sts.status?.availableReplicas || 0}, updatedReplicas=${sts.status?.updatedReplicas || 0}`
+            `⚠️ Cluster status is "${clusterStatus}" but StatefulSet is ready. Proceeding with collection creation (status may be stale)...`
           );
-          if (
-            sts.status?.availableReplicas < sts.spec?.replicas ||
-            sts.status?.updatedReplicas < sts.spec?.replicas
-          ) {
-            log(
-              `🔍 Debug: StatefulSet not fully ready - waiting for ${sts.spec?.replicas - (sts.status?.availableReplicas || 0)} more pod(s) to become available`
-            );
-          }
-        } catch (stsErr) {
+          // Continue - StatefulSet is ready, status may just be stale
+        } else if (!stsReady) {
+          // StatefulSet not ready - use existing retry logic with debug info
           log(
-            `🔍 Debug: Could not read StatefulSet "${clusterName}": ${stsErr.message}`
+            `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}). Collection "${name}" will be created when cluster is ready.`
           );
-        }
 
-        // Check Pod status
-        try {
-          const podsRes = await k8sCoreApi.listNamespacedPod({
-            namespace: namespace,
-            labelSelector: `clustername=${clusterName}`
-          });
-          log(
-            `🔍 Debug Pods: Found ${podsRes.items.length} pod(s) for cluster "${clusterName}"`
-          );
-          for (const pod of podsRes.items) {
-            const podStatus = pod.status?.phase || 'unknown';
-            const ready = pod.status?.conditions?.find(
-              (c) => c.type === 'Ready'
-            )?.status;
+          // Debug: Get detailed cluster and StatefulSet information
+          try {
+            const clusterObj = await k8sCustomApi.getNamespacedCustomObject({
+              group: 'qdrant.operator',
+              version: 'v1alpha1',
+              namespace: namespace,
+              plural: 'qdrantclusters',
+              name: clusterName
+            });
             log(
-              `🔍 Debug Pod "${pod.metadata.name}": phase=${podStatus}, ready=${ready || 'unknown'}, restartCount=${pod.status?.containerStatuses?.[0]?.restartCount || 0}`
+              `🔍 Debug Cluster "${clusterName}": status=${clusterStatus || 'unknown'}, spec.replicas=${clusterObj.spec?.replicas || 'undefined'}, spec.image=${clusterObj.spec?.image || 'undefined'}`
             );
-            if (pod.status?.containerStatuses?.[0]?.state?.waiting) {
+            log(
+              `🔍 Debug StatefulSet "${clusterName}": replicas=${sts.spec?.replicas || 'undefined'}, readyReplicas=${sts.status?.readyReplicas || 0}, availableReplicas=${sts.status?.availableReplicas || 0}, updatedReplicas=${sts.status?.updatedReplicas || 0}`
+            );
+            if (
+              sts.status?.availableReplicas < sts.spec?.replicas ||
+              sts.status?.updatedReplicas < sts.spec?.replicas
+            ) {
               log(
-                `🔍 Debug Pod "${pod.metadata.name}" waiting: reason=${pod.status.containerStatuses[0].state.waiting.reason || 'unknown'}, message=${pod.status.containerStatuses[0].state.waiting.message || 'none'}`
+                `🔍 Debug: StatefulSet not fully ready - waiting for ${sts.spec?.replicas - (sts.status?.availableReplicas || 0)} more pod(s) to become available`
               );
             }
-          }
-        } catch (podsErr) {
-          log(
-            `🔍 Debug: Could not list pods for cluster "${clusterName}": ${podsErr.message}`
-          );
-        }
-      } catch (debugErr) {
-        log(
-          `🔍 Debug: Error getting debug info for cluster "${clusterName}": ${debugErr.message}`
-        );
-      }
 
-      log(
-        `⏰ Scheduling retry in 5 seconds (reduced from 10s for faster recovery)...`
-      );
-      // Schedule retry after delay (reduced to 5 seconds for faster recovery)
-      setTimeout(() => {
-        log(`🔄 Retrying reconciliation for collection "${name}"...`);
-        scheduleReconcile(currentCollection, 'collection');
-      }, 5000); // Retry in 5 seconds (reduced from 10s)
-      return;
+            // Check Pod status
+            try {
+              const podsRes = await k8sCoreApi.listNamespacedPod({
+                namespace: namespace,
+                labelSelector: `clustername=${clusterName}`
+              });
+              log(
+                `🔍 Debug Pods: Found ${podsRes.items.length} pod(s) for cluster "${clusterName}"`
+              );
+              for (const pod of podsRes.items) {
+                const podStatus = pod.status?.phase || 'unknown';
+                const ready = pod.status?.conditions?.find(
+                  (c) => c.type === 'Ready'
+                )?.status;
+                log(
+                  `🔍 Debug Pod "${pod.metadata.name}": phase=${podStatus}, ready=${ready || 'unknown'}, restartCount=${pod.status?.containerStatuses?.[0]?.restartCount || 0}`
+                );
+                if (pod.status?.containerStatuses?.[0]?.state?.waiting) {
+                  log(
+                    `🔍 Debug Pod "${pod.metadata.name}" waiting: reason=${pod.status.containerStatuses[0].state.waiting.reason || 'unknown'}, message=${pod.status.containerStatuses[0].state.waiting.message || 'none'}`
+                  );
+                }
+              }
+            } catch (podsErr) {
+              log(
+                `🔍 Debug: Could not list pods for cluster "${clusterName}": ${podsErr.message}`
+              );
+            }
+          } catch (debugErr) {
+            log(
+              `🔍 Debug: Error getting debug info for cluster "${clusterName}": ${debugErr.message}`
+            );
+          }
+
+          // Schedule retry after delay (reduced to 5 seconds for faster recovery)
+          scheduleRetry(currentCollection, 'collection', 5000, 0);
+          return;
+        }
+      } catch (stsErr) {
+        // If can't check StatefulSet, fall back to status check
+        log(
+          `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}) and could not verify StatefulSet. Collection "${name}" will be created when cluster is ready.`
+        );
+        log(
+          `🔍 Debug: Could not read StatefulSet "${clusterName}": ${stsErr.message}`
+        );
+        scheduleRetry(currentCollection, 'collection', 5000, 0);
+        return;
+      }
     }
 
     log(
-      `✅ Cluster "${clusterName}" is ready (status: ${clusterStatus}), proceeding with collection reconciliation...`
+      `✅ Cluster "${clusterName}" is ready (status: ${clusterStatus}), proceeding with collection reconciliation... (applyQueue size: ${applyQueue.size}, retryQueue size: ${retryQueue.size})`
     );
     log(
       `📋 Collection spec: cluster="${clusterName}", vectorSize=${currentCollection.spec.vectorSize || 'undefined'}, shardNumber=${currentCollection.spec.shardNumber || 'undefined'}, replicationFactor=${currentCollection.spec.replicationFactor || 'undefined'}`
     );
+
+    // Quick health check - try to GET /collections to verify Qdrant is responding
+    try {
+      const parameters = await getConnectionParameters(
+        currentCollection,
+        k8sCustomApi,
+        k8sCoreApi
+      );
+      const healthUrl = parameters.url.replace(/\/collections\/[^/]+$/, '/collections');
+      const healthController = new AbortController();
+      const healthTimeout = setTimeout(() => healthController.abort(), 5000);
+
+      const healthResp = await fetch(healthUrl, {
+        method: 'GET',
+        headers: parameters.headers,
+        signal: healthController.signal
+      });
+      clearTimeout(healthTimeout);
+
+      if (!healthResp.ok && healthResp.status !== 404) {
+        log(
+          `⚠️ Qdrant health check returned ${healthResp.status}, but proceeding...`
+        );
+      } else {
+        log(`✅ Qdrant is responding to API requests`);
+      }
+    } catch (healthErr) {
+      log(
+        `⚠️ Qdrant health check failed: ${healthErr.message}. Will retry in 5s...`
+      );
+      scheduleRetry(currentCollection, 'collection', 5000, 0);
+      return;
+    }
 
     // CRITICAL FIX: Always try createCollection first
     // PUT is idempotent in Qdrant - if collection exists, it will succeed anyway
@@ -524,22 +600,10 @@ export const reconcileCollection = async (apiObj) => {
         plural: 'qdrantcollections',
         name: name
       });
-      log(`⏰ Scheduling retry in 5 seconds after error...`);
-      setTimeout(() => {
-        log(
-          `🔄 Retrying reconciliation for collection "${name}" after error...`
-        );
-        scheduleReconcile(latestCollection, 'collection');
-      }, 5000); // Retry in 5 seconds (reduced from 10s)
+      scheduleRetry(latestCollection, 'collection', 5000, 0);
     } catch (fetchErr) {
       // If we can't fetch latest, use provided object
-      log(`⏰ Scheduling retry in 5 seconds (using provided object)...`);
-      setTimeout(() => {
-        log(
-          `🔄 Retrying reconciliation for collection "${name}" after error (using provided object)...`
-        );
-        scheduleReconcile(apiObj, 'collection');
-      }, 5000); // Retry in 5 seconds (reduced from 10s)
+      scheduleRetry(apiObj, 'collection', 5000, 0);
     }
   }
 };

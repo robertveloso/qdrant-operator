@@ -43,3 +43,6 @@ export const activeReconciles = new Set(); // Set of resourceKeys currently bein
 
 // Queue events that occur during status updates (to avoid losing them)
 export const pendingEvents = new Map(); // Map of resourceKey -> array of pending events
+
+// Retry queue for persistent retries that survive reconnections
+export const retryQueue = new Map(); // Map<retryKey, { apiObj, resourceType, retryCount, scheduledAt, timeoutId }>

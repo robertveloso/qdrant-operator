@@ -2,7 +2,7 @@ import { log } from './utils.js';
 import { genericTemplate } from './cluster-template.js';
 
 // prepare connection params
-const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
+export const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const clusterName = apiObj.spec.cluster;

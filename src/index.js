@@ -144,6 +144,37 @@ const main = async () => {
     }
   }, 30000); // Reconcile every 30 seconds (reduced from 5 minutes for faster recovery)
 
+  // Fast polling for collections not in cache (fallback for watch misses)
+  // This catches collections that might have been created during watch reconnections
+  setInterval(async () => {
+    try {
+      const collectionList = await k8sCustomApi.listNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: '',
+        plural: 'qdrantcollections'
+      });
+
+      for (const collection of collectionList.items) {
+        const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+        if (collection.metadata.deletionTimestamp) {
+          continue;
+        }
+
+        // Se não está no cache, pode ter sido perdido pelo watch
+        if (!collectionCache.has(resourceKey)) {
+          log(
+            `🔍 Fast poll: Found collection "${collection.metadata.name}" not in cache, scheduling reconciliation...`
+          );
+          collectionCache.set(resourceKey, collection);
+          scheduleReconcile(collection, 'collection');
+        }
+      }
+    } catch (err) {
+      log(`Error in fast polling: ${err.message}`);
+    }
+  }, 10000); // Poll every 10 seconds
+
   // Start watching events only after taking ownership of the lease
   await watchResource();
 
