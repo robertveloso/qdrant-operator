@@ -54,7 +54,18 @@ Garante que reconciliações repetidas não causam rollouts desnecessários.
 - Operator é idempotente (mesma entrada = mesma saída)
 - Evita rollouts infinitos
 
-### `45-finalizer-under-load.sh` - Finalizer Sob Carga
+### `40-finalizer.sh` - Finalizer e Cleanup
+
+Valida que a deleção do cluster aciona o finalizer e limpa recursos corretamente.
+
+**O que testa:**
+
+- Finalizer é executado ao deletar QdrantCluster
+- StatefulSet é removido
+- Pods são limpos
+- Recursos não ficam órfãos
+
+### `41-finalizer-under-load.sh` - Finalizer Sob Carga
 
 Valida que o cleanup funciona corretamente quando o cluster é deletado durante atividade (cenário real de produção).
 
@@ -69,16 +80,7 @@ Valida que o cleanup funciona corretamente quando o cluster é deletado durante 
 
 Este teste cobre o pior cenário real de operator - deleção durante atividade. Garante que o finalizer é robusto o suficiente para lidar com operações concorrentes.
 
-### `40-finalizer.sh` - Finalizer e Cleanup
-
-Valida que a deleção do cluster aciona o finalizer e limpa recursos corretamente.
-
-**O que testa:**
-
-- Finalizer é executado ao deletar QdrantCluster
-- StatefulSet é removido
-- Pods são limpos
-- Recursos não ficam órfãos
+**Nota:** Este teste cria um novo cluster e collection, pois o teste anterior (`40-finalizer.sh`) deleta os recursos.
 
 ### `50-leader-failover.sh` - Leader Failover (Opcional)
 
@@ -109,7 +111,7 @@ chmod +x *.sh
 ./20-drift.sh
 ./30-idempotency.sh
 ./40-finalizer.sh
-./45-finalizer-under-load.sh
+./41-finalizer-under-load.sh
 # ./50-leader-failover.sh  # opcional
 ```
 
@@ -127,8 +129,8 @@ tests/e2e/
 ├── 10-happy-path.sh       # Happy path
 ├── 20-drift.sh            # Drift detection
 ├── 30-idempotency.sh      # Idempotência
-├── 45-finalizer-under-load.sh  # Finalizer sob carga
 ├── 40-finalizer.sh        # Finalizer e cleanup
+├── 41-finalizer-under-load.sh  # Finalizer sob carga
 └── 50-leader-failover.sh  # Leader failover (opcional)
 ```
 

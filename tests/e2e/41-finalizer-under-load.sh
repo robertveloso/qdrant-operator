@@ -7,21 +7,15 @@ source "${SCRIPT_DIR}/utils.sh"
 
 log_test "Finalizer Under Load: Verifying cleanup during cluster activity"
 
-# First, ensure we have a cluster and collection (reuse from setup)
-log_info "Verifying cluster exists..."
-if ! kubectl get qdrantcluster my-cluster -n default 2>/dev/null; then
-  log_info "Cluster not found, creating..."
-  kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-cluster-minimal.yaml"
-  wait_for_resource "statefulset" "my-cluster" "default" 60
-  kubectl rollout status statefulset my-cluster -n default --timeout=120s
-fi
+# Create a new cluster and collection for this test (previous test may have deleted them)
+log_info "Creating new cluster for finalizer under load test..."
+kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-cluster-minimal.yaml"
+wait_for_resource "statefulset" "my-cluster" "default" 60
+kubectl rollout status statefulset my-cluster -n default --timeout=120s
 
-log_info "Verifying collection exists..."
-if ! kubectl get qdrantcollections my-collection -n default 2>/dev/null; then
-  log_info "Collection not found, creating..."
-  kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-collection-minimal.yaml"
-  sleep 10
-fi
+log_info "Creating new collection for finalizer under load test..."
+kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-collection-minimal.yaml"
+sleep 10
 
 POD=$(get_operator_pod)
 log_info "Using operator pod: ${POD}"
