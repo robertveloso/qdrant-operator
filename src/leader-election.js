@@ -58,6 +58,21 @@ export const ensureLeaseExists = async () => {
       return;
     }
 
+    // Additional check: ensure they're not the string "null" or "undefined"
+    if (nameParam === 'null' || nameParam === 'undefined' || namespaceParam === 'null' || namespaceParam === 'undefined') {
+      log('⚠️ Parameters are string representations of null/undefined');
+      log(`   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`);
+      return;
+    }
+
+    // Log parameters right before API call (only in debug mode)
+    if (process.env.DEBUG_MODE === 'true') {
+      log(`Calling readNamespacedLease with nameParam="${nameParam}", namespaceParam="${namespaceParam}"`);
+      log(`   typeof nameParam: ${typeof nameParam}, typeof namespaceParam: ${typeof namespaceParam}`);
+      log(`   nameParam === null: ${nameParam === null}, nameParam === undefined: ${nameParam === undefined}`);
+      log(`   namespaceParam === null: ${namespaceParam === null}, namespaceParam === undefined: ${namespaceParam === undefined}`);
+    }
+
     await k8sCoordinationApi.readNamespacedLease(nameParam, namespaceParam);
     log('✅ Lease already exists');
     return;

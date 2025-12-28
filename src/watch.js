@@ -125,11 +125,11 @@ export const onDoneCollection = (err) => {
 // Start watching Kubernetes resources
 export const watchResource = async () => {
   // Check if we're still the leader before starting watch
-  try {
-    // Get namespace from environment - use a local variable to ensure it's not modified
-    const namespace = String(process.env.POD_NAMESPACE || '').trim();
-    const leaseName = 'qdrant-operator';
+  // Define variables outside try block so they're accessible in catch block
+  const namespace = String(process.env.POD_NAMESPACE || '').trim();
+  const leaseName = 'qdrant-operator';
 
+  try {
     // CRITICAL: Validate parameters before API call to prevent client-side errors
     // Check for empty string, null, undefined, or whitespace-only
     if (!namespace || namespace === '') {
