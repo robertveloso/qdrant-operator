@@ -89,7 +89,8 @@ const safeReadNamespacedLease = async (name, namespace) => {
     }
 
     const errorCode = err.code || err.statusCode || parsedBody?.code;
-    const isNotFound = errorCode === 404 ||
+    const isNotFound =
+      errorCode === 404 ||
       (parsedBody && parsedBody.code === 404) ||
       errorMsg.includes('not found') ||
       errorMsg.includes('NotFound');
