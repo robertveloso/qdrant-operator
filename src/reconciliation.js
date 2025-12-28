@@ -346,24 +346,22 @@ export const reconcileCollection = async (apiObj) => {
       `✅ Cluster "${clusterName}" is ready (status: ${clusterStatus}), proceeding with collection reconciliation...`
     );
 
-    // Check if collection exists in cache (fast read for optimization)
-    // NOTE: createCollection/updateCollection will verify actual state via Qdrant API (source of truth)
-    // Cache rule: cache → fast reads, API → critical decisions
-    const cachedCollection = collectionCache.get(resourceKey);
+    // CRITICAL FIX: Always try createCollection first
+    // PUT is idempotent in Qdrant - if collection exists, it will succeed anyway
+    // Don't use cache to decide between create/update - cache is only for performance
+    // The issue was: when collection is created, it's added to cache in onEventCollection
+    // before reconciliation runs, so reconcileCollection would find it in cache
+    // and try to update (PATCH) instead of create (PUT), but PATCH doesn't create
+    // collections that don't exist yet
 
-    if (cachedCollection) {
-      log(`Collection "${name}" found in cache, updating if needed...`);
-      // Collection exists in cache, update if needed
-      // updateCollection will verify actual state via Qdrant API
-      await updateCollection(apiObj, k8sCustomApi, k8sCoreApi);
-      await applyJobs(apiObj, k8sCustomApi, k8sBatchApi);
-    } else {
-      log(`Collection "${name}" not in cache, creating...`);
-      // Collection doesn't exist in cache, create it
-      // createCollection will verify actual state via Qdrant API
-      await createCollection(apiObj, k8sCustomApi, k8sCoreApi);
-      await applyJobs(apiObj, k8sCustomApi, k8sBatchApi);
-    }
+    // Update cache for performance (but don't use it for decision-making)
+    collectionCache.set(resourceKey, apiObj);
+
+    // Always try to create first (PUT is idempotent in Qdrant)
+    // If collection already exists, PUT will succeed and update it if needed
+    log(`Creating/updating collection "${name}" in cluster "${clusterName}"...`);
+    await createCollection(apiObj, k8sCustomApi, k8sCoreApi);
+    await applyJobs(apiObj, k8sCustomApi, k8sBatchApi);
     log(`✅ Completed reconciliation for collection "${name}"`);
   } catch (err) {
     log(`❌ Error reconciling collection "${name}": ${err.message}`);
