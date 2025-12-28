@@ -1,5 +1,44 @@
 # Changelog
 
+## qdrant-operator-0.3.3 (2025-12-28)
+
+### New Features
+
+- **QdrantCollectionBackup CRD**: New Custom Resource Definition to manage backups for existing collections without creating or modifying the collection itself. This allows adding backup functionality to collections created directly via API or UI. See [examples/qdrant-collection-backup.yaml](examples/qdrant-collection-backup.yaml).
+
+### Improvements
+
+- **Leader Election Enhancements**:
+
+  - Added periodic logging for follower pods showing current leader status
+  - Implemented exponential backoff with jitter for watch reconnections
+  - Special handling for "Too Many Requests" (429) errors with increased delays
+  - Increased lease duration from 10s to 30s for better stability
+  - Increased lease refresh interval from 500ms to 5s to reduce API server load
+  - Added success log when pod becomes leader
+
+- **Multi-Architecture Support**:
+
+  - CI/CD now builds multi-arch images (AMD64 + ARM64) in a single build
+  - Same image tag works on both architectures automatically
+  - Optimized for production ARM64 clusters while maintaining CI compatibility
+
+- **CI/CD Improvements**:
+
+  - Reduced CI test timeouts for faster failure detection
+  - Better error diagnostics with pod descriptions and logs
+  - Reduced replica count to 1 in CI for faster deployments
+
+- **Documentation Updates**:
+  - Updated all examples to use Qdrant v1.16.3
+  - Updated default Qdrant version references throughout documentation
+
+### Bug Fixes
+
+- Fixed watch reconnection loops that could cause "Too Many Requests" errors
+- Improved error handling for leader election failures
+- Better resource version tracking to prevent duplicate events
+
 ## qdrant-operator-0.3.2 (2024-02-05)
 
 - Added new specs: sidecarContainers, additionalVolumes, additionalVolumeMounts
@@ -47,7 +86,7 @@ Small bugfixes.
 
 ## qdrant-operator-0.1.2 (2024-01-10)
 
-Operator supports now to generate read-write and read-only apikeys with spec.apikey and spec.readApikey parameters. 
+Operator supports now to generate read-write and read-only apikeys with spec.apikey and spec.readApikey parameters.
 Check the [authentication guide](docs/authentication.md) for getting more information.
 
 ## qdrant-operator-0.1.1 (2024-01-07)

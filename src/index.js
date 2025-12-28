@@ -132,7 +132,9 @@ const onDoneCluster = (err) => {
     if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
       reconnectAttempts.cluster = Math.min(reconnectAttempts.cluster + 1, 10);
       const delay = getReconnectDelay(reconnectAttempts.cluster);
-      log(`Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`);
+      log(
+        `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
+      );
       clusterWatchStart = true;
       setTimeout(() => {
         watchResource();
@@ -162,9 +164,14 @@ const onDoneCollection = (err) => {
 
     // Special handling for rate limiting errors
     if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
-      reconnectAttempts.collection = Math.min(reconnectAttempts.collection + 1, 10);
+      reconnectAttempts.collection = Math.min(
+        reconnectAttempts.collection + 1,
+        10
+      );
       const delay = getReconnectDelay(reconnectAttempts.collection);
-      log(`Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`);
+      log(
+        `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
+      );
       collectionWatchStart = true;
       setTimeout(() => {
         watchResource();
@@ -172,7 +179,10 @@ const onDoneCollection = (err) => {
       return;
     }
     // For other errors, use smaller backoff
-    reconnectAttempts.collection = Math.min(reconnectAttempts.collection + 1, 5);
+    reconnectAttempts.collection = Math.min(
+      reconnectAttempts.collection + 1,
+      5
+    );
   } else {
     // Normal closure, reset attempts
     reconnectAttempts.collection = 0;

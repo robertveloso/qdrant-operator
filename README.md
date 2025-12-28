@@ -251,3 +251,5 @@ This project is licensed under the [MIT](./LICENSE) license.
 ## Disclaimer of Warranty
 
 Please note that the Qdrant operator currently is under development and new releases might contain bugs and breaking changes. The operator is not affiliated with [Qdrant](https://github.com/qdrant/).
+
+This is based on https://github.com/ganochenkodg/qdrant-operator which was no longer updated
