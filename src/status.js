@@ -19,14 +19,14 @@ export const setCleanupStatus = async (
 
   while (retries < maxRetries) {
     try {
-      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name
-      );
-      const resCurrent = readObj.body;
+      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name
+      });
+      const resCurrent = readObj;
       const newStatus = {
         apiVersion: apiObj.apiVersion,
         kind: apiObj.kind,
@@ -42,14 +42,14 @@ export const setCleanupStatus = async (
         }
       };
 
-      await k8sCustomApi.replaceNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name,
-        newStatus
-      );
+      await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name,
+        body: newStatus
+      });
       setTimeout(() => settingStatus.delete(resourceKey), 300);
 
       // Process any pending events that occurred during cleanup status update
@@ -113,14 +113,14 @@ export const setStatus = async (apiObj, status) => {
   while (retries < maxRetries) {
     try {
       // get current status
-      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name
-      );
-      const resCurrent = readObj.body;
+      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name
+      });
+      const resCurrent = readObj;
       // prepare new payload
       const newStatus = {
         apiVersion: apiObj.apiVersion,
@@ -134,14 +134,14 @@ export const setStatus = async (apiObj, status) => {
         }
       };
       // set new status
-      await k8sCustomApi.replaceNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name,
-        newStatus
-      );
+      await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name,
+        body: newStatus
+      });
       log(`The cluster "${name}" status now is ${status}.`);
       // job is done, remove this resource from the map
       setTimeout(() => settingStatus.delete(resourceKey), 300);
@@ -210,14 +210,14 @@ export const updateResourceVersion = async (apiObj) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
-  const res = await k8sCustomApi.getNamespacedCustomObjectStatus(
-    'qdrant.operator',
-    'v1alpha1',
-    namespace,
-    'qdrantclusters',
-    name
-  );
-  const resCurrent = res.body;
+  const res = await k8sCustomApi.getNamespacedCustomObjectStatus({
+    group: 'qdrant.operator',
+    version: 'v1alpha1',
+    namespace: namespace,
+    plural: 'qdrantclusters',
+    name: name
+  });
+  const resCurrent = res;
   // Import dynamically to avoid circular dependency
   const { lastClusterResourceVersion } = await import('./state.js');
   lastClusterResourceVersion.set(

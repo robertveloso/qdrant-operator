@@ -84,13 +84,13 @@ const main = async () => {
       reconcileQueueDepth.set(applyQueue.size);
 
       // Count managed clusters and reconcile if needed
-      const clusterList = await k8sCustomApi.listNamespacedCustomObject(
-        'qdrant.operator',
-        'v1alpha1',
-        '',
-        'qdrantclusters'
-      );
-      const clusters = clusterList.body.items;
+      const clusterList = await k8sCustomApi.listNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: '',
+        plural: 'qdrantclusters'
+      });
+      const clusters = clusterList.items;
       clustersManaged.set(clusters.length);
 
       // Periodic reconciliation: reconcile all clusters to detect drift
@@ -108,13 +108,13 @@ const main = async () => {
       }
 
       // Count managed collections
-      const collectionList = await k8sCustomApi.listNamespacedCustomObject(
-        'qdrant.operator',
-        'v1alpha1',
-        '',
-        'qdrantcollections'
-      );
-      const collections = collectionList.body.items;
+      const collectionList = await k8sCustomApi.listNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: '',
+        plural: 'qdrantcollections'
+      });
+      const collections = collectionList.items;
       collectionsManaged.set(collections.length);
 
       // Periodic reconciliation for collections

@@ -79,15 +79,15 @@ export const onEventCluster = async (phase, apiObj) => {
         // Check if cleanup returned without throwing (force delete scenario)
         // In that case, cleanupCluster returns normally but status is 'Failed'
         try {
-          const statusRes = await k8sCustomApi.getNamespacedCustomObjectStatus(
-            'qdrant.operator',
-            'v1alpha1',
-            apiObj.metadata.namespace,
-            'qdrantclusters',
-            name
-          );
-          const cleanupPhase = statusRes.body.status?.cleanupPhase;
-          const cleanupAttempts = statusRes.body.status?.cleanupAttempts || 0;
+          const statusRes = await k8sCustomApi.getNamespacedCustomObjectStatus({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: apiObj.metadata.namespace,
+            plural: 'qdrantclusters',
+            name: name
+          });
+          const cleanupPhase = statusRes.status?.cleanupPhase;
+          const cleanupAttempts = statusRes.status?.cleanupAttempts || 0;
 
           if (cleanupPhase === 'Failed' && cleanupAttempts >= 10) {
             // Force delete scenario - remove finalizer to allow deletion

@@ -8,14 +8,14 @@ const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const clusterName = apiObj.spec.cluster;
   var parameters = {};
   // read the cluster custom object
-  const resCluster = await k8sCustomApi.getNamespacedCustomObjectStatus(
-    'qdrant.operator',
-    'v1alpha1',
-    namespace,
-    'qdrantclusters',
-    clusterName
-  );
-  const resCurrent = resCluster.body;
+  const resCluster = await k8sCustomApi.getNamespacedCustomObjectStatus({
+    group: 'qdrant.operator',
+    version: 'v1alpha1',
+    namespace: namespace,
+    plural: 'qdrantclusters',
+    name: clusterName
+  });
+  const resCurrent = resCluster;
   // set http or https connection scheme
   if (typeof resCurrent.spec.tls == 'undefined') {
     parameters.url = 'http://';
@@ -26,11 +26,11 @@ const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   parameters.headers = { 'Content-Type': 'application/json' };
   // set apikey header if required
   if (resCurrent.spec.apikey !== 'false') {
-    const resSecret = await k8sCoreApi.readNamespacedSecret(
-      `${clusterName}-apikey`,
-      `${namespace}`
-    );
-    const resApikey = atob(resSecret.body.data['api-key']);
+    const resSecret = await k8sCoreApi.readNamespacedSecret({
+      name: `${clusterName}-apikey`,
+      namespace: namespace
+    });
+    const resApikey = atob(resSecret.data['api-key']);
     parameters.headers['api-key'] = resApikey;
   }
   return parameters;
@@ -43,14 +43,14 @@ const getJobParameters = async (apiObj, k8sCustomApi) => {
   const clusterName = apiObj.spec.cluster;
   var parameters = {};
   // read the cluster custom object
-  const resCluster = await k8sCustomApi.getNamespacedCustomObjectStatus(
-    'qdrant.operator',
-    'v1alpha1',
-    namespace,
-    'qdrantclusters',
-    clusterName
-  );
-  const resCurrent = resCluster.body;
+  const resCluster = await k8sCustomApi.getNamespacedCustomObjectStatus({
+    group: 'qdrant.operator',
+    version: 'v1alpha1',
+    namespace: namespace,
+    plural: 'qdrantclusters',
+    name: clusterName
+  });
+  const resCurrent = resCluster;
   // set http or https connection scheme
   if (typeof resCurrent.spec.tls == 'undefined') {
     parameters.connectionMethod = 'http';
@@ -88,7 +88,10 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
         },
         'job-backup.jsr'
       );
-      k8sBatchApi.createNamespacedJob(`${namespace}`, newBackupJobTemplate);
+      await k8sBatchApi.createNamespacedJob({
+        namespace: namespace,
+        body: newBackupJobTemplate
+      });
       log(
         `Backup Job "${newBackupJobTemplate.metadata.name}" was successfully started!`
       );
@@ -108,7 +111,10 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
         },
         'job-restore.jsr'
       );
-      k8sBatchApi.createNamespacedJob(`${namespace}`, newRestoreJobTemplate);
+      await k8sBatchApi.createNamespacedJob({
+        namespace: namespace,
+        body: newRestoreJobTemplate
+      });
       log(
         `Restore Job "${newRestoreJobTemplate.metadata.name}" was successfully started!`
       );
@@ -126,18 +132,18 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
     );
     try {
       // read cronjob if exists
-      const res = await k8sBatchApi.readNamespacedCronJob(
-        `${name}-backup`,
-        `${namespace}`
-      );
-      const cronjob = res.body;
+      const res = await k8sBatchApi.readNamespacedCronJob({
+        name: `${name}-backup`,
+        namespace: namespace
+      });
+      const cronjob = res;
       log(`CronJob "${name}-backup" already exists!`);
       // and replace it
-      k8sBatchApi.replaceNamespacedCronJob(
-        `${name}-backup`,
-        `${namespace}`,
-        newBackupCronjobTemplate
-      );
+      await k8sBatchApi.replaceNamespacedCronJob({
+        name: `${name}-backup`,
+        namespace: namespace,
+        body: newBackupCronjobTemplate
+      });
       log(`CronJob "${name}-backup" was successfully updated!`);
       return;
     } catch (err) {
@@ -145,10 +151,10 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
     }
     try {
       // create new backup cronjob
-      k8sBatchApi.createNamespacedCronJob(
-        `${namespace}`,
-        newBackupCronjobTemplate
-      );
+      await k8sBatchApi.createNamespacedCronJob({
+        namespace: namespace,
+        body: newBackupCronjobTemplate
+      });
       log(`CronJob "${name}-backup" was successfully created!`);
     } catch (err) {
       log(err);

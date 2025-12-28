@@ -32,14 +32,14 @@ export const updateLastAppliedHash = async (apiObj, hash) => {
 
   while (retries < maxRetries) {
     try {
-      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name
-      );
-      const resCurrent = readObj.body;
+      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name
+      });
+      const resCurrent = readObj;
       const newStatus = {
         apiVersion: apiObj.apiVersion,
         kind: apiObj.kind,
@@ -53,14 +53,14 @@ export const updateLastAppliedHash = async (apiObj, hash) => {
         }
       };
 
-      await k8sCustomApi.replaceNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name,
-        newStatus
-      );
+      await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name,
+        body: newStatus
+      });
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     } catch (err) {

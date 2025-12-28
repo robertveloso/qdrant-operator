@@ -26,14 +26,14 @@ export const cleanupCluster = async (apiObj) => {
 
   // Get current cleanup attempt from status if exists
   try {
-    const statusRes = await k8sCustomApi.getNamespacedCustomObjectStatus(
-      'qdrant.operator',
-      'v1alpha1',
-      namespace,
-      'qdrantclusters',
-      name
-    );
-    const currentAttempt = statusRes.body.status?.cleanupAttempts || 0;
+    const statusRes = await k8sCustomApi.getNamespacedCustomObjectStatus({
+      group: 'qdrant.operator',
+      version: 'v1alpha1',
+      namespace: namespace,
+      plural: 'qdrantclusters',
+      name: name
+    });
+    const currentAttempt = statusRes.status?.cleanupAttempts || 0;
     attempt = currentAttempt + 1;
   } catch (err) {
     // Ignore errors reading status

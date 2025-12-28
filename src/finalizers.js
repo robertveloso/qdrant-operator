@@ -24,18 +24,16 @@ export const addFinalizer = async (apiObj, resourceType) => {
       }
     };
 
-    await k8sCustomApi.patchNamespacedCustomObject(
-      'qdrant.operator',
-      'v1alpha1',
-      namespace,
-      resourceType,
-      name,
-      patch,
-      undefined,
-      undefined,
-      undefined,
-      { headers: { 'Content-Type': 'application/merge-patch+json' } }
-    );
+    await k8sCustomApi.patchNamespacedCustomObject({
+      group: 'qdrant.operator',
+      version: 'v1alpha1',
+      namespace: namespace,
+      plural: resourceType,
+      name: name,
+      body: patch
+    }, {
+      headers: { 'Content-Type': 'application/merge-patch+json' }
+    });
     log(`Added finalizer to ${resourceType} "${name}"`);
   } catch (err) {
     log(`Error adding finalizer to ${resourceType} "${name}": ${err.message}`);
@@ -62,18 +60,16 @@ export const removeFinalizer = async (apiObj, resourceType) => {
       }
     };
 
-    await k8sCustomApi.patchNamespacedCustomObject(
-      'qdrant.operator',
-      'v1alpha1',
-      namespace,
-      resourceType,
-      name,
-      patch,
-      undefined,
-      undefined,
-      undefined,
-      { headers: { 'Content-Type': 'application/merge-patch+json' } }
-    );
+    await k8sCustomApi.patchNamespacedCustomObject({
+      group: 'qdrant.operator',
+      version: 'v1alpha1',
+      namespace: namespace,
+      plural: resourceType,
+      name: name,
+      body: patch
+    }, {
+      headers: { 'Content-Type': 'application/merge-patch+json' }
+    });
     log(`Removed finalizer from ${resourceType} "${name}"`);
   } catch (err) {
     log(

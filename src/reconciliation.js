@@ -160,14 +160,14 @@ export const reconcileCluster = async (apiObj) => {
   // Get last applied hash from status (formalized observed state)
   let lastAppliedHash = null;
   try {
-    const statusRes = await k8sCustomApi.getNamespacedCustomObjectStatus(
-      'qdrant.operator',
-      'v1alpha1',
-      namespace,
-      'qdrantclusters',
-      name
-    );
-    lastAppliedHash = statusRes.body.status?.lastAppliedHash;
+    const statusRes = await k8sCustomApi.getNamespacedCustomObjectStatus({
+      group: 'qdrant.operator',
+      version: 'v1alpha1',
+      namespace: namespace,
+      plural: 'qdrantclusters',
+      name: name
+    });
+    lastAppliedHash = statusRes.status?.lastAppliedHash;
   } catch (err) {
     // Ignore errors reading status
   }
@@ -246,15 +246,15 @@ export const reconcileCluster = async (apiObj) => {
     }
 
     try {
-      const currentStatus = await k8sCustomApi.getNamespacedCustomObjectStatus(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        'qdrantclusters',
-        name
-      );
+      const currentStatus = await k8sCustomApi.getNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: name
+      });
       // Only update status if it's not already Running
-      if (currentStatus.body.status?.qdrantStatus !== 'Running') {
+      if (currentStatus.status?.qdrantStatus !== 'Running') {
         // Check if StatefulSet is actually ready
         const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
           name: name,
