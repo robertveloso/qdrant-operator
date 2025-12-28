@@ -1,4 +1,4 @@
-import { k8sCoordinationApi, watch } from './k8s-client.js';
+import { k8sCoordinationApi, k8sCustomApi, watch } from './k8s-client.js';
 import {
   clusterWatchAborted,
   collectionWatchAborted,
@@ -6,11 +6,14 @@ import {
   collectionWatchRequest,
   statefulSetWatchRequests,
   statefulSetWatchAborted,
-  reconnectAttempts
+  reconnectAttempts,
+  clusterCache,
+  collectionCache
 } from './state.js';
 import { watchRestarts, errorsTotal, watchActive } from './metrics.js';
 import { log } from './utils.js';
 import { onEventCluster, onEventCollection } from './events.js';
+import { scheduleReconcile } from './reconciliation.js';
 
 // Wrapper function to safely call readNamespacedLease with proper validation
 const safeReadNamespacedLease = async (name, namespace) => {
@@ -168,7 +171,29 @@ export const onDoneCluster = (err) => {
       log(
         `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
       );
-      setTimeout(() => {
+      setTimeout(async () => {
+        // List all clusters to catch any that were created while watch was down
+        try {
+          const clusterList = await k8sCustomApi.listNamespacedCustomObject({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: '',
+            plural: 'qdrantclusters'
+          });
+          for (const cluster of clusterList.items) {
+            const resourceKey = `${cluster.metadata.namespace}/${cluster.metadata.name}`;
+            // Skip if deletion is in progress
+            if (cluster.metadata.deletionTimestamp) {
+              continue;
+            }
+            // Update cache
+            clusterCache.set(resourceKey, cluster);
+            // Reconcile to ensure state is correct
+            scheduleReconcile(cluster, 'cluster');
+          }
+        } catch (listErr) {
+          log(`Error listing clusters after reconnect: ${listErr.message}`);
+        }
         watchResource();
       }, delay);
       return;
@@ -216,7 +241,29 @@ export const onDoneCollection = (err) => {
         `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
       );
       watchRestarts.inc({ resource_type: 'collection', reason: 'rate_limit' });
-      setTimeout(() => {
+      setTimeout(async () => {
+        // List all collections to catch any that were created while watch was down
+        try {
+          const collectionList = await k8sCustomApi.listNamespacedCustomObject({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: '',
+            plural: 'qdrantcollections'
+          });
+          for (const collection of collectionList.items) {
+            const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+            // Skip if deletion is in progress
+            if (collection.metadata.deletionTimestamp) {
+              continue;
+            }
+            // Update cache
+            collectionCache.set(resourceKey, collection);
+            // Reconcile to ensure it exists in Qdrant
+            scheduleReconcile(collection, 'collection');
+          }
+        } catch (listErr) {
+          log(`Error listing collections after reconnect: ${listErr.message}`);
+        }
         watchResource();
       }, delay);
       return;
