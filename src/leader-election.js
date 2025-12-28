@@ -12,10 +12,14 @@ const safeReadNamespacedLease = async (name, namespace) => {
     throw new Error(`Invalid parameters: name=${name}, namespace=${namespace}`);
   }
   if (typeof name !== 'string' || typeof namespace !== 'string') {
-    throw new Error(`Parameters must be strings: name=${typeof name}, namespace=${typeof namespace}`);
+    throw new Error(
+      `Parameters must be strings: name=${typeof name}, namespace=${typeof namespace}`
+    );
   }
   if (name === '' || namespace === '') {
-    throw new Error(`Parameters cannot be empty: name="${name}", namespace="${namespace}"`);
+    throw new Error(
+      `Parameters cannot be empty: name="${name}", namespace="${namespace}"`
+    );
   }
 
   // Ensure parameters are explicitly strings (defensive programming)
@@ -23,17 +27,33 @@ const safeReadNamespacedLease = async (name, namespace) => {
   const namespaceStr = String(namespace);
 
   // Final check after string conversion
-  if (nameStr === '' || namespaceStr === '' || nameStr === 'null' || nameStr === 'undefined' ||
-    namespaceStr === 'null' || namespaceStr === 'undefined') {
-    throw new Error(`Parameters invalid after string conversion: name="${nameStr}", namespace="${namespaceStr}"`);
+  if (
+    nameStr === '' ||
+    namespaceStr === '' ||
+    nameStr === 'null' ||
+    nameStr === 'undefined' ||
+    namespaceStr === 'null' ||
+    namespaceStr === 'undefined'
+  ) {
+    throw new Error(
+      `Parameters invalid after string conversion: name="${nameStr}", namespace="${namespaceStr}"`
+    );
   }
 
   // Log parameters right before API call (only in debug mode)
   if (process.env.DEBUG_MODE === 'true') {
-    log(`safeReadNamespacedLease: About to call API with name="${nameStr}", namespace="${namespaceStr}"`);
-    log(`   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`);
-    log(`   nameStr === null: ${nameStr === null}, nameStr === undefined: ${nameStr === undefined}`);
-    log(`   namespaceStr === null: ${namespaceStr === null}, namespaceStr === undefined: ${namespaceStr === undefined}`);
+    log(
+      `safeReadNamespacedLease: About to call API with name="${nameStr}", namespace="${namespaceStr}"`
+    );
+    log(
+      `   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`
+    );
+    log(
+      `   nameStr === null: ${nameStr === null}, nameStr === undefined: ${nameStr === undefined}`
+    );
+    log(
+      `   namespaceStr === null: ${namespaceStr === null}, namespaceStr === undefined: ${namespaceStr === undefined}`
+    );
   }
 
   // Call the API with validated and converted parameters
@@ -47,18 +67,26 @@ const safeReadNamespacedLease = async (name, namespace) => {
   } catch (err) {
     // If that fails, try with positional arguments (for regular CoordinationV1Api)
     const errorMsg = err.message || String(err);
-    if (errorMsg.includes('Required parameter') || errorMsg.includes('was null or undefined')) {
+    if (
+      errorMsg.includes('Required parameter') ||
+      errorMsg.includes('was null or undefined')
+    ) {
       // Log detailed error information if in debug mode
       if (process.env.DEBUG_MODE === 'true') {
         log(`Error with object format, trying positional: ${errorMsg}`);
       }
       // Fallback to positional arguments
-      return await k8sCoordinationApi.readNamespacedLease(nameStr, namespaceStr);
+      return await k8sCoordinationApi.readNamespacedLease(
+        nameStr,
+        namespaceStr
+      );
     }
     // Log detailed error information if in debug mode
     if (process.env.DEBUG_MODE === 'true') {
       log(`Error in safeReadNamespacedLease: ${errorMsg}`);
-      log(`   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`);
+      log(
+        `   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`
+      );
       log(`   Error stack: ${err.stack || 'No stack trace'}`);
     }
     throw err;
@@ -79,23 +107,38 @@ export const ensureLeaseExists = async () => {
   // Check for empty string, null, undefined, or whitespace-only
   if (!namespace || namespace === '' || !leaseName || leaseName === '') {
     log('⚠️ POD_NAMESPACE or leaseName not set, cannot ensure lease exists');
-    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+    log(
+      `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
+    );
     log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
-    log(`   typeof namespace: ${typeof namespace}, typeof leaseName: ${typeof leaseName}`);
+    log(
+      `   typeof namespace: ${typeof namespace}, typeof leaseName: ${typeof leaseName}`
+    );
     return;
   }
 
   // Additional validation: ensure values are not null/undefined
-  if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
-    log('⚠️ POD_NAMESPACE or leaseName is null/undefined, cannot ensure lease exists');
-    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+  if (
+    namespace === null ||
+    namespace === undefined ||
+    leaseName === null ||
+    leaseName === undefined
+  ) {
+    log(
+      '⚠️ POD_NAMESPACE or leaseName is null/undefined, cannot ensure lease exists'
+    );
+    log(
+      `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
+    );
     log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
     return;
   }
 
   // Log parameters for debugging (only in debug mode)
   if (process.env.DEBUG_MODE === 'true') {
-    log(`ensureLeaseExists: namespace="${namespace}", leaseName="${leaseName}"`);
+    log(
+      `ensureLeaseExists: namespace="${namespace}", leaseName="${leaseName}"`
+    );
   }
 
   try {
@@ -103,7 +146,9 @@ export const ensureLeaseExists = async () => {
     // Double-check parameters right before API call
     if (!leaseName || !namespace) {
       log('⚠️ Parameters became invalid before API call');
-      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      log(
+        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
+      );
       return;
     }
 
@@ -112,26 +157,50 @@ export const ensureLeaseExists = async () => {
     const namespaceParam = String(namespace);
 
     // Final validation: ensure they're not empty strings after conversion
-    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+    if (
+      !nameParam ||
+      !namespaceParam ||
+      nameParam === '' ||
+      namespaceParam === ''
+    ) {
       log('⚠️ Parameters invalid after string conversion');
-      log(`   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`);
+      log(
+        `   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`
+      );
       return;
     }
 
     // Additional check: ensure they're not the string "null" or "undefined"
-    if (nameParam === 'null' || nameParam === 'undefined' || namespaceParam === 'null' || namespaceParam === 'undefined') {
+    if (
+      nameParam === 'null' ||
+      nameParam === 'undefined' ||
+      namespaceParam === 'null' ||
+      namespaceParam === 'undefined'
+    ) {
       log('⚠️ Parameters are string representations of null/undefined');
-      log(`   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`);
+      log(
+        `   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`
+      );
       return;
     }
 
     // Log parameters right before API call (only in debug mode)
     if (process.env.DEBUG_MODE === 'true') {
-      log(`Calling readNamespacedLease with nameParam="${nameParam}", namespaceParam="${namespaceParam}"`);
-      log(`   typeof nameParam: ${typeof nameParam}, typeof namespaceParam: ${typeof namespaceParam}`);
-      log(`   nameParam === null: ${nameParam === null}, nameParam === undefined: ${nameParam === undefined}`);
-      log(`   namespaceParam === null: ${namespaceParam === null}, namespaceParam === undefined: ${namespaceParam === undefined}`);
-      log(`   nameParam value: ${JSON.stringify(nameParam)}, namespaceParam value: ${JSON.stringify(namespaceParam)}`);
+      log(
+        `Calling readNamespacedLease with nameParam="${nameParam}", namespaceParam="${namespaceParam}"`
+      );
+      log(
+        `   typeof nameParam: ${typeof nameParam}, typeof namespaceParam: ${typeof namespaceParam}`
+      );
+      log(
+        `   nameParam === null: ${nameParam === null}, nameParam === undefined: ${nameParam === undefined}`
+      );
+      log(
+        `   namespaceParam === null: ${namespaceParam === null}, namespaceParam === undefined: ${namespaceParam === undefined}`
+      );
+      log(
+        `   nameParam value: ${JSON.stringify(nameParam)}, namespaceParam value: ${JSON.stringify(namespaceParam)}`
+      );
     }
 
     // Call API using wrapper function for safer parameter handling
@@ -153,7 +222,9 @@ export const ensureLeaseExists = async () => {
       log(
         `⚠️ Client-side validation error: ${errorMsg}. This indicates a programming error.`
       );
-      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      log(
+        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
+      );
       log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
       // Don't try to create lease if we can't even validate parameters
       return;
@@ -217,7 +288,12 @@ export const ensureLeaseExists = async () => {
             const namespaceParam = String(namespace);
 
             // Final validation: ensure they're not empty strings after conversion
-            if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+            if (
+              !nameParam ||
+              !namespaceParam ||
+              nameParam === '' ||
+              namespaceParam === ''
+            ) {
               log('⚠️ Parameters invalid after string conversion during retry');
               break;
             }
@@ -296,9 +372,16 @@ export const isLeader = async () => {
   }
 
   // Additional validation: ensure values are not null/undefined
-  if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
+  if (
+    namespace === null ||
+    namespace === undefined ||
+    leaseName === null ||
+    leaseName === undefined
+  ) {
     log('⚠️ POD_NAMESPACE or leaseName is null/undefined in isLeader()');
-    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+    log(
+      `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
+    );
     log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
     leaderElection.set(0);
     return;
@@ -317,7 +400,12 @@ export const isLeader = async () => {
     const namespaceParam = String(namespace);
 
     // Final validation: ensure they're not empty strings after conversion
-    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+    if (
+      !nameParam ||
+      !namespaceParam ||
+      nameParam === '' ||
+      namespaceParam === ''
+    ) {
       log('⚠️ Parameters invalid after string conversion in isLeader()');
       leaderElection.set(0);
       return;
@@ -399,7 +487,9 @@ export const isLeader = async () => {
       log(
         `⚠️ Client-side validation error in isLeader(): ${errorMsg}. This indicates a programming error.`
       );
-      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      log(
+        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
+      );
       log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
       leaderElection.set(0);
       return;
@@ -453,7 +543,12 @@ export const acquireLeaderLock = async () => {
       }
 
       // Additional validation: ensure values are not null/undefined
-      if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
+      if (
+        namespace === null ||
+        namespace === undefined ||
+        leaseName === null ||
+        leaseName === undefined
+      ) {
         return; // Silently skip if params are null/undefined
       }
 
@@ -467,7 +562,12 @@ export const acquireLeaderLock = async () => {
       const namespaceParam = String(namespace);
 
       // Final validation: ensure they're not empty strings after conversion
-      if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+      if (
+        !nameParam ||
+        !namespaceParam ||
+        nameParam === '' ||
+        namespaceParam === ''
+      ) {
         return; // Silently skip if params invalid after conversion
       }
 
