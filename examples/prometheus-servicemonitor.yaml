@@ -1,0 +1,28 @@
+# ServiceMonitor for Prometheus Operator
+# This allows Prometheus to scrape metrics from the Qdrant Operator
+#
+# Prerequisites:
+# - Prometheus Operator installed in your cluster
+# - Service qdrant-operator-metrics exists (created by deploy/operator.yaml)
+#
+# Usage:
+#   kubectl apply -f examples/prometheus-servicemonitor.yaml
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: qdrant-operator
+  namespace: qdrant-operator
+  labels:
+    app: qdrant-operator
+    component: operator
+spec:
+  selector:
+    matchLabels:
+      app: qdrant-operator
+      component: operator
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

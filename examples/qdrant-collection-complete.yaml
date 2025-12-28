@@ -2,6 +2,8 @@ apiVersion: qdrant.operator/v1alpha1
 kind: QdrantCollection
 metadata:
   name: my-collection
+  # Note: Finalizers are automatically added by the operator for safe deletion
+  # The operator will handle cleanup before final deletion
 spec:
   cluster: my-cluster
   vectorSize: 10

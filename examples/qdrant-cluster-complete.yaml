@@ -2,9 +2,12 @@ apiVersion: qdrant.operator/v1alpha1
 kind: QdrantCluster
 metadata:
   name: my-cluster
+  # Note: Finalizers are automatically added by the operator for safe deletion
+  # The operator will handle cleanup (scale down, resource cleanup) before final deletion
 spec:
   replicas: 3
   image: qdrant/qdrant:v1.16.3
+  # Latest validated Qdrant version: v1.16.3
   apikey: 'true'
   # apikey: 'yourkey'
   # Optional. If not declared - the operator will generate new random key

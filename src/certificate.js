@@ -1,4 +1,4 @@
-import { log } from './index.js';
+import { log } from './utils.js';
 import { exec } from 'child_process';
 import * as fs from 'fs';
 

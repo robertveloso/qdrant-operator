@@ -1,0 +1,243 @@
+import { k8sCoordinationApi, watch } from './k8s-client.js';
+import {
+  clusterWatchAborted,
+  collectionWatchAborted,
+  clusterWatchRequest,
+  collectionWatchRequest,
+  statefulSetWatchRequests,
+  statefulSetWatchAborted,
+  reconnectAttempts,
+  watchActive
+} from './state.js';
+import { watchRestarts, errorsTotal } from './metrics.js';
+import { log } from './utils.js';
+import { onEventCluster, onEventCollection } from './events.js';
+
+const MAX_RECONNECT_DELAY = 60000; // 60 segundos máximo
+const INITIAL_RECONNECT_DELAY = 2000; // Começar com 2 segundos
+
+// Calculate exponential backoff delay
+export const getReconnectDelay = (attempts) => {
+  const delay = Math.min(
+    INITIAL_RECONNECT_DELAY * Math.pow(2, attempts),
+    MAX_RECONNECT_DELAY
+  );
+  // Add jitter to avoid thundering herd
+  const jitter = Math.random() * 1000;
+  return delay + jitter;
+};
+
+// QdrantClusters watch has stopped unexpectedly, restart
+export const onDoneCluster = (err) => {
+  // Don't reconnect if watch was aborted intentionally
+  if (clusterWatchAborted.value) {
+    log('QdrantClusters watch was aborted, not reconnecting.');
+    clusterWatchAborted.value = false;
+    clusterWatchRequest.value = null;
+    watchActive.set({ resource_type: 'cluster' }, 0);
+    return;
+  }
+
+  if (err) {
+    const errorMsg = err.message || String(err);
+    log(`Connection to QdrantClusters closed with error: ${errorMsg}`);
+    watchRestarts.inc({ resource_type: 'cluster', reason: 'error' });
+
+    // Special handling for rate limiting errors
+    if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
+      reconnectAttempts.cluster = Math.min(reconnectAttempts.cluster + 1, 10);
+      const delay = getReconnectDelay(reconnectAttempts.cluster);
+      log(
+        `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
+      );
+      setTimeout(() => {
+        watchResource();
+      }, delay);
+      return;
+    }
+    // For other errors, use smaller backoff
+    reconnectAttempts.cluster = Math.min(reconnectAttempts.cluster + 1, 5);
+  } else {
+    // Normal closure, reset attempts
+    reconnectAttempts.cluster = 0;
+    log(`Connection to QdrantClusters closed, reconnecting...`);
+    watchRestarts.inc({ resource_type: 'cluster', reason: 'normal' });
+  }
+
+  const delay = getReconnectDelay(reconnectAttempts.cluster);
+  setTimeout(() => {
+    watchResource();
+  }, delay);
+};
+
+// QdrantCollections watch has stopped unexpectedly, restart
+export const onDoneCollection = (err) => {
+  // Don't reconnect if watch was aborted intentionally
+  if (collectionWatchAborted.value) {
+    log('QdrantCollections watch was aborted, not reconnecting.');
+    collectionWatchAborted.value = false;
+    collectionWatchRequest.value = null;
+    watchActive.set({ resource_type: 'collection' }, 0);
+    return;
+  }
+
+  watchActive.set({ resource_type: 'collection' }, 0);
+
+  if (err) {
+    const errorMsg = err.message || String(err);
+    log(`Connection to QdrantCollections closed with error: ${errorMsg}`);
+
+    // Special handling for rate limiting errors
+    if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
+      reconnectAttempts.collection = Math.min(
+        reconnectAttempts.collection + 1,
+        10
+      );
+      const delay = getReconnectDelay(reconnectAttempts.collection);
+      log(
+        `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
+      );
+      watchRestarts.inc({ resource_type: 'collection', reason: 'rate_limit' });
+      setTimeout(() => {
+        watchResource();
+      }, delay);
+      return;
+    }
+    // For other errors, use smaller backoff
+    reconnectAttempts.collection = Math.min(
+      reconnectAttempts.collection + 1,
+      5
+    );
+    watchRestarts.inc({ resource_type: 'collection', reason: 'error' });
+    errorsTotal.inc({ type: 'watch' });
+  } else {
+    // Normal closure, reset attempts
+    reconnectAttempts.collection = 0;
+    log(`Connection to QdrantCollections closed, reconnecting...`);
+    watchRestarts.inc({ resource_type: 'collection', reason: 'normal' });
+  }
+
+  const delay = getReconnectDelay(reconnectAttempts.collection);
+  setTimeout(() => {
+    watchResource();
+  }, delay);
+};
+
+// Start watching Kubernetes resources
+export const watchResource = async () => {
+  // Check if we're still the leader before starting watch
+  try {
+    const namespace = process.env.POD_NAMESPACE;
+    if (!namespace) {
+      log('❌ ERROR: POD_NAMESPACE not set, cannot start watch');
+      return;
+    }
+    const res = await k8sCoordinationApi.readNamespacedLease(
+      'qdrant-operator',
+      namespace
+    );
+    if (res.body.spec.holderIdentity !== process.env.POD_NAME) {
+      log('Not the leader anymore, stopping watch...');
+      return;
+    }
+  } catch (err) {
+    log(`Error checking leader status: ${err.message}`);
+    return;
+  }
+
+  // Abort existing watches before starting new ones
+  if (clusterWatchRequest.value) {
+    clusterWatchAborted.value = true;
+    try {
+      clusterWatchRequest.value.abort();
+    } catch (err) {
+      // Ignore errors when aborting
+    }
+    clusterWatchRequest.value = null;
+  }
+  if (collectionWatchRequest.value) {
+    collectionWatchAborted.value = true;
+    try {
+      collectionWatchRequest.value.abort();
+    } catch (err) {
+      // Ignore errors when aborting
+    }
+    collectionWatchRequest.value = null;
+  }
+
+  // Reset abort flags
+  clusterWatchAborted.value = false;
+  collectionWatchAborted.value = false;
+
+  // Start required watches (always recreate since we abort existing ones above)
+  if (!clusterWatchRequest.value) {
+    try {
+      clusterWatchRequest.value = watch.watch(
+        '/apis/qdrant.operator/v1alpha1/qdrantclusters',
+        {},
+        onEventCluster,
+        onDoneCluster
+      );
+      log('Watching QdrantClusters API.');
+      reconnectAttempts.cluster = 0; // Reset on successful start
+      watchActive.set({ resource_type: 'cluster' }, 1);
+    } catch (err) {
+      log(`Error starting QdrantClusters watch: ${err.message}`);
+      clusterWatchRequest.value = null;
+      errorsTotal.inc({ type: 'watch_start' });
+    }
+  }
+  if (!collectionWatchRequest.value) {
+    try {
+      collectionWatchRequest.value = watch.watch(
+        '/apis/qdrant.operator/v1alpha1/qdrantcollections',
+        {},
+        onEventCollection,
+        onDoneCollection
+      );
+      log('Watching QdrantCollections API.');
+      reconnectAttempts.collection = 0; // Reset on successful start
+      watchActive.set({ resource_type: 'collection' }, 1);
+    } catch (err) {
+      log(`Error starting QdrantCollections watch: ${err.message}`);
+      collectionWatchRequest.value = null;
+      errorsTotal.inc({ type: 'watch_start' });
+    }
+  }
+  // Note: watch.watch() doesn't return a Promise, it starts the watch in the background
+  // The callbacks (onEventCluster, onEventCollection) will be called when events occur
+};
+
+// Abort all active watches gracefully
+export const abortAllWatches = () => {
+  log('Aborting all active watches...');
+  if (clusterWatchRequest.value) {
+    clusterWatchAborted.value = true;
+    try {
+      clusterWatchRequest.value.abort();
+    } catch (err) {
+      // Ignore errors when aborting
+    }
+    clusterWatchRequest.value = null;
+  }
+  if (collectionWatchRequest.value) {
+    collectionWatchAborted.value = true;
+    try {
+      collectionWatchRequest.value.abort();
+    } catch (err) {
+      // Ignore errors when aborting
+    }
+    collectionWatchRequest.value = null;
+  }
+  // Abort all StatefulSet watches
+  for (const [key, request] of statefulSetWatchRequests.entries()) {
+    statefulSetWatchAborted.set(key, true);
+    try {
+      request.abort();
+    } catch (err) {
+      // Ignore errors when aborting
+    }
+    statefulSetWatchRequests.delete(key);
+    statefulSetWatchAborted.delete(key);
+  }
+};

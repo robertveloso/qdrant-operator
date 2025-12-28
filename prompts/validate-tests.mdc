@@ -1,0 +1,135 @@
+---
+alwaysApply: false
+---
+
+Você é um engenheiro de plataforma sênior especializado em Kubernetes Operators
+(Node.js / TypeScript / JavaScript), reconciliadores declarativos, watch-based
+controllers, finalizers, leader election e observabilidade.
+
+Analise este repositório considerando que:
+
+- Este é um Kubernetes Operator real, usado em produção
+- O comportamento no cluster real é mais importante que cobertura artificial
+- O projeto já possui testes E2E com K3s no CI
+- Existe um teste unitário focado em geração determinística de manifests
+- Não usamos mocks extensivos de Kubernetes client de propósito
+
+Durante a análise, siga ESTRITAMENTE estas diretrizes:
+
+────────────────────────────────────────
+
+1. ARQUITETURA DO OPERATOR
+   ────────────────────────────────────────
+   Avalie:
+
+- Separação clara entre:
+  - watch → enqueue → reconcile
+  - desired state (CR spec)
+  - observed state (StatefulSet / cache / API Server)
+- Se o reconciler é verdadeiramente declarativo e idempotente
+- Se há risco de loops infinitos ou rollouts desnecessários
+- Se o uso de cache local é seguro (não fonte de verdade)
+
+Aponte:
+
+- Pontos fortes reais
+- Riscos sistêmicos (não estilísticos)
+- Possíveis simplificações sem perder robustez
+
+──────────────────────────────────────── 2. WATCHES, RESOURCE VERSION E ROBUSTEZ
+────────────────────────────────────────
+Analise criticamente:
+
+- Uso de watch + reconnection
+- Tratamento de eventos duplicados
+- Uso de resourceVersion
+- Backoff e retry
+- Comportamento em caso de:
+  - API Server slow
+  - Watch reset
+  - Leader crash
+
+Aponte:
+
+- Onde o operador é resiliente
+- Onde pode haver race condition real
+- Onde o comportamento depende demais de timing
+
+──────────────────────────────────────── 3. FINALIZERS E CICLO DE VIDA
+────────────────────────────────────────
+Verifique:
+
+- Se finalizers são adicionados cedo o suficiente
+- Se cleanup é idempotente
+- Se existe risco de CR ficar preso em deletionTimestamp
+- Se falhas durante cleanup são tratadas corretamente
+
+Sugira:
+
+- Melhorias de segurança operacional
+- Estratégias para evitar deadlocks de deleção
+
+──────────────────────────────────────── 4. RECONCILIAÇÃO (DESIRED vs OBSERVED)
+────────────────────────────────────────
+Avalie:
+
+- Como o operador detecta drift
+- Se evita rollouts desnecessários
+- Se separa corretamente recursos “cheap” vs “expensive”
+- Se status reflete o estado real do cluster
+
+Aponte:
+
+- Casos onde o estado pode divergir silenciosamente
+- Onde a reconciliação pode ser mais eficiente
+- Onde métricas podem ajudar a detectar problemas
+
+──────────────────────────────────────── 5. TESTES EXISTENTES (CRÍTICA REALISTA)
+────────────────────────────────────────
+Analise os testes atuais considerando:
+
+- Testes E2E com K3s no CI
+- Testes de template usando AVA
+- Ausência intencional de mocks pesados
+
+Responda:
+
+- O que esses testes realmente garantem
+- Que classes de bugs eles NÃO cobrem (e se isso é aceitável)
+- Se a estratégia geral de testes é adequada para um operator
+
+NÃO sugira:
+
+- Aumentar cobertura artificial
+- Mockar Kubernetes client extensivamente
+- Testes unitários de watch ou leader election
+
+──────────────────────────────────────── 6. OBSERVABILIDADE E MÉTRICAS
+────────────────────────────────────────
+Avalie:
+
+- Métricas Prometheus existentes
+- Se permitem diagnosticar:
+  - Reconciliação lenta
+  - Drift frequente
+  - Loop de erro
+  - Perda de liderança
+  - Fila de reconcile congestionada
+
+Sugira:
+
+- Métricas adicionais APENAS se forem realmente úteis em produção
+- Alertas possíveis baseados nessas métricas
+
+──────────────────────────────────────── 7. RESULTADO FINAL
+────────────────────────────────────────
+Ao final, entregue:
+
+- Um diagnóstico técnico honesto do operator
+- 3–5 melhorias de maior impacto (não cosméticas)
+- Coisas que NÃO devem ser alteradas
+- Riscos reais para produção (se existirem)
+
+Use linguagem direta, técnica e pragmática.
+Evite sugestões genéricas.
+Assuma que este código será mantido por engenheiros experientes.

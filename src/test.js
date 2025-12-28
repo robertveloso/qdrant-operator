@@ -5,6 +5,31 @@ import {
   genericTemplate
 } from './cluster-template.js';
 
+/**
+ * Unit Tests for Template Generation
+ *
+ * Testing Strategy:
+ * =================
+ * These tests validate deterministic manifest generation from Custom Resources.
+ * This is the PRIMARY value of unit tests in Kubernetes operators.
+ *
+ * What these tests cover:
+ * - Template functions produce correct Kubernetes manifests
+ * - Spec merging works correctly (minimal vs complete)
+ * - OwnerReferences, labels, and metadata are set correctly
+ * - Volumes, env vars, sidecars, and all spec fields are properly applied
+ * - Structural compatibility and contract enforcement
+ *
+ * What these tests DON'T cover (and shouldn't):
+ * - Watch, leader election, finalizers, reconcile loops
+ * - API server behavior, timing, race conditions
+ * - These are covered by E2E tests (tests/e2e/)
+ *
+ * Philosophy:
+ * "In Kubernetes operators, unit tests protect the code.
+ *  E2E tests protect production."
+ */
+
 const clusterMinimalPayload = {
   apiVersion: 'qdrant.operator/v1alpha1',
   kind: 'QdrantCluster',
@@ -456,42 +481,44 @@ const expectedCompleteServiceTemplate = {
   }
 };
 
-console.log('Testing template functions...');
-
 test('Minimal cluster template', (t) => {
-  var newMinimalTemplate = clusterTemplate(clusterMinimalPayload);
-  t.is(
-    JSON.stringify(newMinimalTemplate),
-    JSON.stringify(expectedMinimalTemplate)
+  const actual = clusterTemplate(clusterMinimalPayload);
+  t.deepEqual(
+    actual,
+    expectedMinimalTemplate,
+    'Minimal cluster spec should generate correct StatefulSet manifest'
   );
 });
 
 test('Complete cluster template', (t) => {
-  var newCompleteTemplate = clusterTemplate(clusterCompletePayload);
-  t.is(
-    JSON.stringify(newCompleteTemplate),
-    JSON.stringify(expectedCompleteTemplate)
+  const actual = clusterTemplate(clusterCompletePayload);
+  t.deepEqual(
+    actual,
+    expectedCompleteTemplate,
+    'Complete cluster spec should generate correct StatefulSet with all features'
   );
 });
 
 test('Complete cluster apikey secret template', (t) => {
-  var newCompleteSecretTemplate = clusterSecretTemplate(
+  const actual = clusterSecretTemplate(
     clusterCompletePayload,
     clusterCompletePayload.spec.apikey
   );
-  t.is(
-    JSON.stringify(newCompleteSecretTemplate),
-    JSON.stringify(expectedCompleteSecretTemplate)
+  t.deepEqual(
+    actual,
+    expectedCompleteSecretTemplate,
+    'API key secret should be correctly generated and base64 encoded'
   );
 });
 
 test('Complete cluster headless service template', (t) => {
-  var newCompleteServiceTemplate = genericTemplate(
+  const actual = genericTemplate(
     clusterCompletePayload,
     'service-headless.jsr'
   );
-  t.is(
-    JSON.stringify(newCompleteServiceTemplate),
-    JSON.stringify(expectedCompleteServiceTemplate)
+  t.deepEqual(
+    actual,
+    expectedCompleteServiceTemplate,
+    'Headless service template should have correct clusterIP and ports'
   );
 });

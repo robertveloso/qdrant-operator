@@ -1,4 +1,4 @@
-import { log } from './index.js';
+import { log } from './utils.js';
 import { genericTemplate } from './cluster-template.js';
 
 // prepare connection params

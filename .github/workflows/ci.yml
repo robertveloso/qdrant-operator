@@ -6,11 +6,15 @@ on:
       - '.github/workflows/ci.yml'
       - 'deploy/**'
       - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
   pull_request:
     paths:
       - '.github/workflows/ci.yml'
       - 'deploy/**'
       - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
 jobs:
   lint-and-unit:
     runs-on: ubuntu-latest
@@ -146,71 +150,30 @@ jobs:
             echo "⚠️ Warning: Operator may not be leader yet, but continuing..."
             kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=20
           fi
-      - name: Integration test
+      - name: Run E2E operator tests
         run: |
-          echo "📦 Creating Qdrant cluster..."
-          kubectl apply -f examples/qdrant-cluster-minimal.yaml
+          chmod +x tests/e2e/*.sh
 
-          echo "⏳ Waiting for operator to create StatefulSet (timeout: 60s)..."
-          timeout=60
-          elapsed=0
-          while [ $elapsed -lt $timeout ]; do
-            if kubectl get statefulset my-cluster -n default 2>/dev/null; then
-              echo "✅ StatefulSet created!"
-              break
-            fi
-            echo "   Waiting for StatefulSet... (${elapsed}s/${timeout}s)"
-            sleep 5
-            elapsed=$((elapsed + 5))
-          done
+          echo "🧪 Running E2E test suite..."
+          echo ""
 
-          if ! kubectl get statefulset my-cluster -n default 2>/dev/null; then
-            echo "❌ StatefulSet not created within timeout"
-            echo "📋 QdrantCluster status:"
-            kubectl get qdrantcluster my-cluster -n default -o yaml || true
-            echo "📋 Operator logs:"
-            kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
-            exit 1
-          fi
+          # Setup: Create cluster and collection
+          tests/e2e/00-setup.sh
 
-          echo "⏳ Waiting for StatefulSet rollout (timeout: 120s)..."
-          kubectl rollout status statefulset my-cluster -n default --timeout=120s || {
-            echo "❌ StatefulSet rollout failed"
-            kubectl get pods -n default -l clustername=my-cluster
-            kubectl describe statefulset my-cluster -n default
-            exit 1
-          }
+          # Happy path: Verify collection is accessible
+          tests/e2e/10-happy-path.sh
 
-          echo "📦 Creating Qdrant collection..."
-          kubectl apply -f examples/qdrant-collection-minimal.yaml
+          # Drift detection: Verify operator corrects manual changes
+          tests/e2e/20-drift.sh
 
-          echo "⏳ Waiting for collection to be ready..."
-          sleep 10
+          # Idempotency: Verify no unnecessary rollouts
+          tests/e2e/30-idempotency.sh
 
-          export PODNAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o name|head -n 1)
-          echo "🔍 Checking collection status via pod: ${PODNAME}"
+          # Finalizer: Verify proper cleanup
+          tests/e2e/40-finalizer.sh
 
-          # Retry a few times in case collection is still being created
-          max_attempts=6
-          attempt=1
-          while [ $attempt -le $max_attempts ]; do
-            export RESULT=$(kubectl exec -n qdrant-operator -t $PODNAME -- curl -s "http://my-cluster.default:6333/collections/my-collection" 2>/dev/null || echo "")
-            echo "Attempt $attempt/$max_attempts - Qdrant response:"
-            echo "$RESULT"
+          # Leader failover: Verify HA behavior (optional, can be enabled if needed)
+          # tests/e2e/50-leader-failover.sh
 
-            if [[ $RESULT =~ "\"status\":\"green\"" ]]; then
-              echo "✅ Collection \"my-collection\" is available!"
-              exit 0
-            fi
-
-            if [ $attempt -lt $max_attempts ]; then
-              echo "   Collection not ready yet, waiting 5s..."
-              sleep 5
-            fi
-            attempt=$((attempt + 1))
-          done
-
-          echo "❌ Collection not available after $max_attempts attempts"
-          echo "📋 Collection status:"
-          kubectl get qdrantcollection my-collection -n default -o yaml || true
-          exit 1
+          echo ""
+          echo "✅ All E2E tests passed!"

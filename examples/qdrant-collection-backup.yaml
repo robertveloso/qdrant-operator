@@ -3,6 +3,8 @@ kind: QdrantCollectionBackup
 metadata:
   name: my-collection-backup
   namespace: default
+  # Note: This CRD manages backups for existing collections
+  # The collection itself can be created outside the operator
 spec:
   cluster: my-cluster
   collectionName: my-collection # Name of existing collection

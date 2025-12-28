@@ -92,6 +92,10 @@ spec:
         - name: operator
           image: ghcr.io/robertveloso/qdrant-operator/qdrant-operator:main
           imagePullPolicy: Always
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
           resources:
             requests:
               memory: '256Mi'
@@ -111,3 +115,25 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: METRICS_PORT
+              value: '8080'
+              # Optional: Change metrics port if needed
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-operator-metrics
+  namespace: qdrant-operator
+  labels:
+    app: qdrant-operator
+    component: operator
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: qdrant-operator
+    component: operator
