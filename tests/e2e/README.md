@@ -54,6 +54,21 @@ Garante que reconciliações repetidas não causam rollouts desnecessários.
 - Operator é idempotente (mesma entrada = mesma saída)
 - Evita rollouts infinitos
 
+### `45-finalizer-under-load.sh` - Finalizer Sob Carga
+
+Valida que o cleanup funciona corretamente quando o cluster é deletado durante atividade (cenário real de produção).
+
+**O que testa:**
+
+- Finalizer funciona mesmo com queries ativas no cluster
+- Cleanup não é interrompido por atividade simultânea
+- StatefulSet e pods são limpos mesmo sob carga
+- Collection é limpa corretamente durante deleção sob carga
+
+**Por que é importante:**
+
+Este teste cobre o pior cenário real de operator - deleção durante atividade. Garante que o finalizer é robusto o suficiente para lidar com operações concorrentes.
+
 ### `40-finalizer.sh` - Finalizer e Cleanup
 
 Valida que a deleção do cluster aciona o finalizer e limpa recursos corretamente.
@@ -94,6 +109,7 @@ chmod +x *.sh
 ./20-drift.sh
 ./30-idempotency.sh
 ./40-finalizer.sh
+./45-finalizer-under-load.sh
 # ./50-leader-failover.sh  # opcional
 ```
 
@@ -111,6 +127,7 @@ tests/e2e/
 ├── 10-happy-path.sh       # Happy path
 ├── 20-drift.sh            # Drift detection
 ├── 30-idempotency.sh      # Idempotência
+├── 45-finalizer-under-load.sh  # Finalizer sob carga
 ├── 40-finalizer.sh        # Finalizer e cleanup
 └── 50-leader-failover.sh  # Leader failover (opcional)
 ```
@@ -132,8 +149,9 @@ Um operator confiável deve passar em todos estes testes:
 1. ✅ **Happy Path**: Operação básica funciona
 2. ✅ **Drift Detection**: Reconciliação declarativa funciona
 3. ✅ **Idempotência**: Não causa rollouts desnecessários
-4. ✅ **Finalizers**: Cleanup adequado
-5. ✅ **HA** (opcional): Failover funciona
+4. ✅ **Finalizer Sob Carga**: Cleanup funciona durante atividade
+5. ✅ **Finalizers**: Cleanup adequado
+6. ✅ **HA** (opcional): Failover funciona
 
 > **Regra de Ouro**: Se seu operator passa nesses testes, ele é confiável em produção.
 

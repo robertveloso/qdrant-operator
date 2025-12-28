@@ -174,7 +174,13 @@ jobs:
           # Idempotency: Verify no unnecessary rollouts
           tests/e2e/30-idempotency.sh
 
-          # Finalizer: Verify proper cleanup
+          # Finalizer under load: Verify cleanup during cluster activity
+          # Note: This test recreates cluster/collection if needed, so it can run
+          # after 40-finalizer.sh which deletes them. It tests the worst-case
+          # scenario: deletion while cluster is under active use.
+          tests/e2e/45-finalizer-under-load.sh
+
+          # Finalizer: Verify proper cleanup (runs last as it deletes cluster)
           tests/e2e/40-finalizer.sh
 
           # Leader failover: Verify HA behavior (optional, can be enabled if needed)

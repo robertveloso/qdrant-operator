@@ -56,8 +56,33 @@ const main = async () => {
   // Initialize leader election
   await initializeLeaderElection();
 
-  // Acquire leader lock
-  await acquireLeaderLock();
+  // Acquire leader lock (with retry for transient startup errors)
+  let lockAcquired = false;
+  const maxLockAttempts = 5;
+  for (let attempt = 1; attempt <= maxLockAttempts; attempt++) {
+    try {
+      await acquireLeaderLock();
+      lockAcquired = true;
+      break;
+    } catch (err) {
+      if (attempt < maxLockAttempts) {
+        log(
+          `⚠️ Failed to acquire leader lock (attempt ${attempt}/${maxLockAttempts}), retrying in 3s...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } else {
+        log(
+          `❌ Failed to acquire leader lock after ${maxLockAttempts} attempts. This may indicate a configuration issue.`
+        );
+        throw err; // Re-throw on final attempt
+      }
+    }
+  }
+
+  if (!lockAcquired) {
+    log('❌ Could not acquire leader lock. Exiting.');
+    process.exit(1);
+  }
 
   // Start metrics server
   const metricsPort = process.env.METRICS_PORT || 8080;

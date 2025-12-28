@@ -16,45 +16,121 @@ export const ensureLeaseExists = async () => {
     log('⚠️ POD_NAMESPACE not set, cannot ensure lease exists');
     return;
   }
+
+  const leaseName = 'qdrant-operator';
+
   try {
     // Try to read the lease
-    await k8sCoordinationApi.readNamespacedLease('qdrant-operator', namespace);
+    await k8sCoordinationApi.readNamespacedLease(leaseName, namespace);
     log('✅ Lease already exists');
+    return;
   } catch (err) {
-    // If lease doesn't exist (404), create it
-    if (
-      err.code === 404 ||
-      (err.message && err.message.includes('not found'))
-    ) {
+    // Check if lease doesn't exist (404) or if there's an error reading it
+    const errorCode =
+      err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+    const errorMsg = err.message || String(err);
+    const errorBody = err.body || '';
+
+    // Parse error body if it's a string
+    let parsedBody = null;
+    if (typeof errorBody === 'string' && errorBody) {
+      try {
+        parsedBody = JSON.parse(errorBody);
+      } catch (e) {
+        // Ignore parse errors
+      }
+    } else if (errorBody) {
+      parsedBody = errorBody;
+    }
+
+    const isNotFound =
+      errorCode === 404 ||
+      (parsedBody && parsedBody.code === 404) ||
+      errorMsg.includes('not found') ||
+      errorMsg.includes('NotFound');
+
+    if (isNotFound) {
+      // Lease doesn't exist - create it
+      log(`Lease "${leaseName}" not found, creating...`);
       try {
         const lease = {
+          apiVersion: 'coordination.k8s.io/v1',
+          kind: 'Lease',
           metadata: {
-            name: 'qdrant-operator',
+            name: leaseName,
             namespace: namespace
           },
           spec: {
             holderIdentity: '',
             leaseDurationSeconds: 30,
-            acquireTime: new Date().toISOString(),
-            renewTime: new Date().toISOString()
+            acquireTime: null,
+            renewTime: null
           }
         };
         await k8sCoordinationApi.createNamespacedLease(namespace, lease);
         log('✅ Created lease for leader election');
+
+        // CRITICAL: Wait until lease is readable (Kubernetes eventual consistency)
+        // createNamespacedLease returns before the object is readable
+        log('Waiting for lease to be readable...');
+        for (let i = 0; i < 10; i++) {
+          try {
+            await k8sCoordinationApi.readNamespacedLease(leaseName, namespace);
+            log('✅ Lease is now readable');
+            break;
+          } catch (readErr) {
+            const readErrorCode = readErr.code || readErr.statusCode;
+            if (readErrorCode === 404) {
+              // Still not readable, wait and retry
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              continue;
+            }
+            // Other error, throw it
+            throw readErr;
+          }
+        }
       } catch (createErr) {
         const createErrorMsg = createErr.message || String(createErr);
+        const createErrorCode = createErr.code || createErr.statusCode;
+        const createErrorBody = createErr.body || '';
+
+        // Parse create error body
+        let createParsedBody = null;
+        if (typeof createErrorBody === 'string' && createErrorBody) {
+          try {
+            createParsedBody = JSON.parse(createErrorBody);
+          } catch (e) {
+            // Ignore parse errors
+          }
+        } else if (createErrorBody) {
+          createParsedBody = createErrorBody;
+        }
+
         // If lease was created by another pod between our check and create, that's fine
-        if (createErrorMsg.includes('already exists')) {
+        if (
+          createErrorCode === 409 ||
+          (createParsedBody && createParsedBody.code === 409) ||
+          createErrorMsg.includes('already exists') ||
+          createErrorMsg.includes('AlreadyExists')
+        ) {
           log(
             '✅ Lease was created by another pod (expected in multi-replica setup)'
           );
         } else {
           log(`⚠️ Failed to create lease: ${createErrorMsg}`);
+          log(`   Error code: ${createErrorCode}`);
+          if (createParsedBody) {
+            log(`   Error details: ${JSON.stringify(createParsedBody)}`);
+          }
           // Continue anyway, K8SLock should handle it
         }
       }
     } else {
-      log(`⚠️ Unexpected error checking lease: ${err.message || String(err)}`);
+      log(`⚠️ Unexpected error checking lease: ${errorMsg}`);
+      log(`   Error code: ${errorCode}`);
+      if (parsedBody) {
+        log(`   Error details: ${JSON.stringify(parsedBody)}`);
+      }
     }
   }
 };
@@ -72,47 +148,70 @@ export const isLeader = async () => {
       'qdrant-operator',
       namespace
     );
-    // leader status was lost
-    if (res.body.spec.holderIdentity !== process.env.POD_NAME) {
-      log('Leader status was lost, initiating graceful shutdown...');
+
+    // Get holder identity (can be empty string, undefined, or a pod name)
+    const holder = res.body?.spec?.holderIdentity;
+
+    // CRITICAL: Empty holderIdentity means "no leader elected yet" (startup)
+    // NOT "leader lost". Only trigger shutdown if we were leader and lost it.
+    if (!holder || holder === '') {
+      log('No leader elected yet (startup phase)');
       leaderElection.set(0);
+      return;
+    }
 
-      // Mark as shutting down to prevent new reconciles
-      shuttingDown.value = true;
+    // If holder exists but is not us, check if we were previously leader
+    // If we were leader and now we're not, that's a loss of leadership
+    if (holder !== process.env.POD_NAME) {
+      // Only shutdown if we were actually leader before
+      // On startup, activeReconciles will be empty, so this won't trigger shutdown
+      // The key indicator: if we have active reconciles, we were leader
+      if (activeReconciles.size > 0) {
+        log('Leader status was lost, initiating graceful shutdown...');
+        leaderElection.set(0);
 
-      // Abort watches immediately
-      abortAllWatches();
+        // Mark as shutting down to prevent new reconciles
+        shuttingDown.value = true;
 
-      // Wait for active reconciles to complete (with timeout)
-      const GRACEFUL_SHUTDOWN_TIMEOUT = 30000; // 30 seconds
-      const startTime = Date.now();
+        // Abort watches immediately
+        abortAllWatches();
 
-      while (activeReconciles.size > 0) {
-        const elapsed = Date.now() - startTime;
-        if (elapsed >= GRACEFUL_SHUTDOWN_TIMEOUT) {
+        // Wait for active reconciles to complete (with timeout)
+        const GRACEFUL_SHUTDOWN_TIMEOUT = 30000; // 30 seconds
+        const startTime = Date.now();
+
+        while (activeReconciles.size > 0) {
+          const elapsed = Date.now() - startTime;
+          if (elapsed >= GRACEFUL_SHUTDOWN_TIMEOUT) {
+            log(
+              `⚠️ Graceful shutdown timeout (${GRACEFUL_SHUTDOWN_TIMEOUT}ms), ${activeReconciles.size} reconciles still active. Exiting...`
+            );
+            break;
+          }
+
+          const activeList = Array.from(activeReconciles);
           log(
-            `⚠️ Graceful shutdown timeout (${GRACEFUL_SHUTDOWN_TIMEOUT}ms), ${activeReconciles.size} reconciles still active. Exiting...`
+            `Waiting for ${activeReconciles.size} active reconcile(s) to complete: ${activeList.join(', ')} (${Math.round(elapsed / 1000)}s/${GRACEFUL_SHUTDOWN_TIMEOUT / 1000}s)`
           );
-          break;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
 
-        const activeList = Array.from(activeReconciles);
-        log(
-          `Waiting for ${activeReconciles.size} active reconcile(s) to complete: ${activeList.join(', ')} (${Math.round(elapsed / 1000)}s/${GRACEFUL_SHUTDOWN_TIMEOUT / 1000}s)`
-        );
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+        if (activeReconciles.size === 0) {
+          log('✅ All active reconciles completed, exiting gracefully');
+        }
 
-      if (activeReconciles.size === 0) {
-        log('✅ All active reconciles completed, exiting gracefully');
+        process.exit(0); // Exit gracefully (0, not 1)
+      } else {
+        // We're not leader, but we never were (startup case)
+        log(`Current leader is "${holder}", we are follower`);
+        leaderElection.set(0);
       }
-
-      process.exit(1);
     } else {
+      // We are the leader
       leaderElection.set(1);
     }
   } catch (err) {
-    log(err);
+    log(`Error checking leader status: ${err.message || String(err)}`);
     leaderElection.set(0);
   }
 };
@@ -187,11 +286,14 @@ export const acquireLeaderLock = async () => {
     );
     // Small delay to ensure namespace is fully available
     await new Promise((resolve) => setTimeout(resolve, 1000));
+    // startLocking() with waitUntilLock: true will block until lock is acquired
+    // or throw if there's a fatal error. Transient errors should be handled
+    // by K8SLock's internal retry mechanism.
     await lock.startLocking();
   } catch (err) {
     const errorMsg = err.message || String(err);
     const errorBody = err.body || '';
-    log(`❌ Failed to acquire leader lock: ${errorMsg}`);
+    log(`⚠️ Failed to acquire leader lock: ${errorMsg}`);
     if (errorBody) {
       try {
         const errorJson =
@@ -203,10 +305,15 @@ export const acquireLeaderLock = async () => {
     }
     log(`   POD_NAMESPACE: ${process.env.POD_NAMESPACE || 'UNDEFINED'}`);
     log(`   POD_NAME: ${process.env.POD_NAME || 'UNDEFINED'}`);
+    log(`   This may be a transient error. K8SLock should retry internally.`);
     log(
-      `   This is a fatal error. The operator cannot continue without leader election.`
+      `   If this persists, check lease permissions and API server connectivity.`
     );
-    process.exit(1);
+    // Don't exit - K8SLock with waitUntilLock: true should handle retries
+    // If it throws, it means it gave up after all retries, which is unusual
+    // In that case, we let the process continue and the periodic isLeader() check
+    // will handle the situation. The operator won't start watches until it's leader.
+    throw err; // Re-throw so caller knows acquisition failed
   }
 
   // Clear the follower logging interval once we become leader
