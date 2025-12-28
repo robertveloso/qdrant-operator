@@ -25,8 +25,8 @@ const lock = new K8SLock({
   lockLeaserId: process.env.POD_NAME,
   waitUntilLock: true,
   createLeaseIfNotExist: true,
-  leaseDurationInSeconds: 10,
-  refreshLockInterval: 500,
+  leaseDurationInSeconds: 30,
+  refreshLockInterval: 5000,
   lockTryInterval: 5000
 });
 
@@ -105,19 +105,49 @@ const onEventCollection = async (phase, apiObj) => {
 
 // QdrantClusters watch has stopped unexpectedly, restart
 const onDoneCluster = (err) => {
-  log(`Connection to QdrantClusters closed, reconnecting...`);
+  if (err) {
+    log(`Connection to QdrantClusters closed with error: ${err.message}`);
+  } else {
+    log(`Connection to QdrantClusters closed, reconnecting...`);
+  }
   clusterWatchStart = true;
-  watchResource();
+  // Add delay to avoid tight reconnection loops
+  setTimeout(() => {
+    watchResource();
+  }, 1000);
 };
 
 // QdrantCollections watch has stopped unexpectedly, restart
 const onDoneCollection = (err) => {
-  log(`Connection to QdrantCollections closed, reconnecting...`);
+  if (err) {
+    log(`Connection to QdrantCollections closed with error: ${err.message}`);
+  } else {
+    log(`Connection to QdrantCollections closed, reconnecting...`);
+  }
   collectionWatchStart = true;
-  watchResource();
+  // Add delay to avoid tight reconnection loops
+  setTimeout(() => {
+    watchResource();
+  }, 1000);
 };
 
 const watchResource = async () => {
+  // Check if we're still the leader before starting watch
+  try {
+    const namespace = process.env.POD_NAMESPACE;
+    const res = await k8sCoordinationApi.readNamespacedLease(
+      'qdrant-operator',
+      namespace
+    );
+    if (res.body.spec.holderIdentity !== process.env.POD_NAME) {
+      log('Not the leader anymore, stopping watch...');
+      return;
+    }
+  } catch (err) {
+    log(`Error checking leader status: ${err.message}`);
+    return;
+  }
+
   //restart required watches
   var watchList = [];
   if (clusterWatchStart) {

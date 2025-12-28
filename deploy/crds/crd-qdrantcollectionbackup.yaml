@@ -1,0 +1,61 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: qdrantcollectionbackups.qdrant.operator
+  labels:
+    app: qdrant-operator
+spec:
+  group: qdrant.operator
+  names:
+    plural: qdrantcollectionbackups
+    singular: qdrantcollectionbackup
+    kind: QdrantCollectionBackup
+    shortNames: []
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: 'A Qdrant collection backup definition (manages only backups, not the collection itself)'
+          type: object
+          required: ['kind', 'apiVersion', 'spec']
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: 'Backup configuration for an existing Qdrant collection'
+              type: object
+              required: ['cluster', 'collectionName', 'snapshots']
+              properties:
+                cluster:
+                  type: string
+                  description: 'Name of the QdrantCluster where the collection exists'
+                collectionName:
+                  type: string
+                  description: 'Name of the existing Qdrant collection to backup'
+                snapshots:
+                  type: object
+                  required:
+                    ['s3EndpointURL', 's3CredentialsSecretName', 'bucketName']
+                  properties:
+                    backupNow:
+                      type: boolean
+                      default: false
+                    backupSchedule:
+                      type: string
+                      default: ''
+                    restoreSnapshotName:
+                      type: string
+                      default: ''
+                    s3EndpointURL:
+                      type: string
+                    s3CredentialsSecretName:
+                      type: string
+                    bucketName:
+                      type: string

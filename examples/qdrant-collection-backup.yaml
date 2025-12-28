@@ -1,0 +1,19 @@
+apiVersion: qdrant.operator/v1alpha1
+kind: QdrantCollectionBackup
+metadata:
+  name: my-collection-backup
+  namespace: default
+spec:
+  cluster: my-cluster
+  collectionName: my-collection # Name of existing collection
+  snapshots:
+    s3EndpointURL: https://storage.googleapis.com/
+    # s3EndpointURL: https://s3.amazonaws.com
+    s3CredentialsSecretName: bucket-credentials
+    bucketName: unique-bucket-for-shapshots
+    # Option 1: Instant backup
+    backupNow: true
+    # Option 2: Scheduled backup (cron format)
+    # backupSchedule: "0 2 * * *"  # Daily at 2 AM
+    # Option 3: Restore from snapshot
+    # restoreSnapshotName: my-cluster/my-collection/2024-01-21-23-38

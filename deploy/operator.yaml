@@ -24,7 +24,9 @@ rules:
         'qdrantclusters',
         'qdrantclusters/status',
         'qdrantcollections',
-        'qdrantcollections/status'
+        'qdrantcollections/status',
+        'qdrantcollectionbackups',
+        'qdrantcollectionbackups/status'
       ]
     verbs: ['get', 'list', 'create', 'update', 'delete', 'patch', 'watch']
   - apiGroups: ['']
