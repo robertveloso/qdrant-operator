@@ -126,21 +126,68 @@ export const onDoneCollection = (err) => {
 export const watchResource = async () => {
   // Check if we're still the leader before starting watch
   try {
-    const namespace = process.env.POD_NAMESPACE;
-    if (!namespace) {
+    // Get namespace from environment - use a local variable to ensure it's not modified
+    const namespace = String(process.env.POD_NAMESPACE || '').trim();
+    const leaseName = 'qdrant-operator';
+
+    // CRITICAL: Validate parameters before API call to prevent client-side errors
+    // Check for empty string, null, undefined, or whitespace-only
+    if (!namespace || namespace === '') {
       log('❌ ERROR: POD_NAMESPACE not set, cannot start watch');
+      log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
       return;
     }
+    // Additional validation: ensure values are not null/undefined
+    if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
+      log('❌ ERROR: POD_NAMESPACE or leaseName is null/undefined, cannot start watch');
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      return;
+    }
+    // Double-check parameters right before API call
+    if (!leaseName || !namespace) {
+      log('❌ ERROR: Parameters became invalid before API call in watchResource()');
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      return;
+    }
+
+    // Ensure parameters are explicitly strings (defensive programming)
+    const nameParam = String(leaseName);
+    const namespaceParam = String(namespace);
+
+    // Final validation: ensure they're not empty strings after conversion
+    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+      log('❌ ERROR: Parameters invalid after string conversion in watchResource()');
+      log(`   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`);
+      return;
+    }
+
     const res = await k8sCoordinationApi.readNamespacedLease(
-      'qdrant-operator',
-      namespace
+      nameParam,
+      namespaceParam
     );
     if (res.body.spec.holderIdentity !== process.env.POD_NAME) {
       log('Not the leader anymore, stopping watch...');
       return;
     }
   } catch (err) {
-    log(`Error checking leader status: ${err.message}`);
+    const errorMsg = err.message || String(err);
+
+    // Check for client-side validation errors (parameter null/undefined)
+    if (
+      errorMsg.includes('Required parameter') &&
+      (errorMsg.includes('was null or undefined') ||
+        errorMsg.includes('was null') ||
+        errorMsg.includes('was undefined'))
+    ) {
+      log(
+        `⚠️ Client-side validation error in watchResource(): ${errorMsg}. This indicates a programming error.`
+      );
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
+      return;
+    }
+
+    log(`Error checking leader status: ${errorMsg}`);
     return;
   }
 

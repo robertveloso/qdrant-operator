@@ -11,23 +11,76 @@ export let lock = null;
 // Ensure lease exists before K8SLock tries to use it
 // This is a workaround for K8SLock not creating the lease even with createLeaseIfNotExist: true
 export const ensureLeaseExists = async () => {
-  const namespace = process.env.POD_NAMESPACE;
+  // Get namespace from environment - use a local variable to ensure it's not modified
+  const namespace = String(process.env.POD_NAMESPACE || '').trim();
   const leaseName = 'qdrant-operator';
 
   // CRITICAL: Validate parameters before API call to prevent client-side errors
-  if (!namespace || !leaseName || namespace === '' || leaseName === '') {
+  // Check for empty string, null, undefined, or whitespace-only
+  if (!namespace || namespace === '' || !leaseName || leaseName === '') {
     log('⚠️ POD_NAMESPACE or leaseName not set, cannot ensure lease exists');
+    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+    log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
+    log(`   typeof namespace: ${typeof namespace}, typeof leaseName: ${typeof leaseName}`);
     return;
+  }
+
+  // Additional validation: ensure values are not null/undefined
+  if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
+    log('⚠️ POD_NAMESPACE or leaseName is null/undefined, cannot ensure lease exists');
+    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+    log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
+    return;
+  }
+
+  // Log parameters for debugging (only in debug mode)
+  if (process.env.DEBUG_MODE === 'true') {
+    log(`ensureLeaseExists: namespace="${namespace}", leaseName="${leaseName}"`);
   }
 
   try {
     // Try to read the lease
-    await k8sCoordinationApi.readNamespacedLease(leaseName, namespace);
+    // Double-check parameters right before API call
+    if (!leaseName || !namespace) {
+      log('⚠️ Parameters became invalid before API call');
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      return;
+    }
+
+    // Ensure parameters are explicitly strings (defensive programming)
+    const nameParam = String(leaseName);
+    const namespaceParam = String(namespace);
+
+    // Final validation: ensure they're not empty strings after conversion
+    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+      log('⚠️ Parameters invalid after string conversion');
+      log(`   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`);
+      return;
+    }
+
+    await k8sCoordinationApi.readNamespacedLease(nameParam, namespaceParam);
     log('✅ Lease already exists');
     return;
   } catch (err) {
     const errorMsg = err.message || String(err);
     const errorBody = err.body || '';
+
+    // Check for client-side validation errors (parameter null/undefined)
+    // These happen before the HTTP request is made
+    if (
+      errorMsg.includes('Required parameter') &&
+      (errorMsg.includes('was null or undefined') ||
+        errorMsg.includes('was null') ||
+        errorMsg.includes('was undefined'))
+    ) {
+      log(
+        `⚠️ Client-side validation error: ${errorMsg}. This indicates a programming error.`
+      );
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
+      // Don't try to create lease if we can't even validate parameters
+      return;
+    }
 
     // Parse error body safely (never parse undefined/null)
     let parsedBody = null;
@@ -76,7 +129,23 @@ export const ensureLeaseExists = async () => {
         log('Waiting for lease to be readable...');
         for (let i = 0; i < 10; i++) {
           try {
-            await k8sCoordinationApi.readNamespacedLease(leaseName, namespace);
+            // Validate parameters before each retry
+            if (!leaseName || !namespace) {
+              log('⚠️ Parameters invalid during lease read retry');
+              break;
+            }
+
+            // Ensure parameters are explicitly strings (defensive programming)
+            const nameParam = String(leaseName);
+            const namespaceParam = String(namespace);
+
+            // Final validation: ensure they're not empty strings after conversion
+            if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+              log('⚠️ Parameters invalid after string conversion during retry');
+              break;
+            }
+
+            await k8sCoordinationApi.readNamespacedLease(nameParam, namespaceParam);
             log('✅ Lease is now readable');
             break;
           } catch (readErr) {
@@ -138,19 +207,48 @@ export const ensureLeaseExists = async () => {
 
 // Check the current leader
 export const isLeader = async () => {
-  const namespace = process.env.POD_NAMESPACE;
+  // Get namespace from environment - use a local variable to ensure it's not modified
+  const namespace = String(process.env.POD_NAMESPACE || '').trim();
   const leaseName = 'qdrant-operator';
 
   // CRITICAL: Validate parameters before API call to prevent client-side errors
-  if (!namespace || !leaseName || namespace === '' || leaseName === '') {
+  // Check for empty string, null, undefined, or whitespace-only
+  if (!namespace || namespace === '' || !leaseName || leaseName === '') {
+    leaderElection.set(0);
+    return;
+  }
+
+  // Additional validation: ensure values are not null/undefined
+  if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
+    log('⚠️ POD_NAMESPACE or leaseName is null/undefined in isLeader()');
+    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+    log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
     leaderElection.set(0);
     return;
   }
 
   try {
+    // Double-check parameters right before API call
+    if (!leaseName || !namespace) {
+      log('⚠️ Parameters became invalid before API call in isLeader()');
+      leaderElection.set(0);
+      return;
+    }
+
+    // Ensure parameters are explicitly strings (defensive programming)
+    const nameParam = String(leaseName);
+    const namespaceParam = String(namespace);
+
+    // Final validation: ensure they're not empty strings after conversion
+    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+      log('⚠️ Parameters invalid after string conversion in isLeader()');
+      leaderElection.set(0);
+      return;
+    }
+
     const res = await k8sCoordinationApi.readNamespacedLease(
-      leaseName,
-      namespace
+      nameParam,
+      namespaceParam
     );
 
     // Get holder identity (can be empty string, undefined, or a pod name)
@@ -215,7 +313,25 @@ export const isLeader = async () => {
       leaderElection.set(1);
     }
   } catch (err) {
-    log(`Error checking leader status: ${err.message || String(err)}`);
+    const errorMsg = err.message || String(err);
+
+    // Check for client-side validation errors (parameter null/undefined)
+    if (
+      errorMsg.includes('Required parameter') &&
+      (errorMsg.includes('was null or undefined') ||
+        errorMsg.includes('was null') ||
+        errorMsg.includes('was undefined'))
+    ) {
+      log(
+        `⚠️ Client-side validation error in isLeader(): ${errorMsg}. This indicates a programming error.`
+      );
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
+      log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
+      leaderElection.set(0);
+      return;
+    }
+
+    log(`Error checking leader status: ${errorMsg}`);
     leaderElection.set(0);
   }
 };
@@ -252,17 +368,38 @@ export const acquireLeaderLock = async () => {
   // Start periodic logging for followers while waiting
   let followerLogInterval = setInterval(async () => {
     try {
-      const namespace = process.env.POD_NAMESPACE;
+      // Get namespace from environment - use a local variable to ensure it's not modified
+      const namespace = String(process.env.POD_NAMESPACE || '').trim();
       const leaseName = 'qdrant-operator';
 
       // CRITICAL: Validate parameters before API call to prevent client-side errors
-      if (!namespace || !leaseName || namespace === '' || leaseName === '') {
+      // Check for empty string, null, undefined, or whitespace-only
+      if (!namespace || namespace === '' || !leaseName || leaseName === '') {
         return; // Silently skip if params not ready
       }
 
+      // Additional validation: ensure values are not null/undefined
+      if (namespace === null || namespace === undefined || leaseName === null || leaseName === undefined) {
+        return; // Silently skip if params are null/undefined
+      }
+
+      // Double-check parameters right before API call
+      if (!leaseName || !namespace) {
+        return; // Silently skip if params became invalid
+      }
+
+      // Ensure parameters are explicitly strings (defensive programming)
+      const nameParam = String(leaseName);
+      const namespaceParam = String(namespace);
+
+      // Final validation: ensure they're not empty strings after conversion
+      if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+        return; // Silently skip if params invalid after conversion
+      }
+
       const res = await k8sCoordinationApi.readNamespacedLease(
-        leaseName,
-        namespace
+        nameParam,
+        namespaceParam
       );
       const currentLeader = res.body.spec.holderIdentity;
       if (currentLeader && currentLeader !== process.env.POD_NAME) {
