@@ -83,10 +83,10 @@ const safeReadNamespacedLease = async (name, namespace) => {
         log(`Error with object format, trying positional: ${errorMsg}`);
       }
       // Fallback to positional arguments
-      return await k8sCoordinationApi.readNamespacedLease(
-        nameStr,
-        namespaceStr
-      );
+      return await k8sCoordinationApi.readNamespacedLease({
+        name: nameStr,
+        namespace: namespaceStr
+      });
     }
     // Log detailed error information if in debug mode
     if (process.env.DEBUG_MODE === 'true') {
