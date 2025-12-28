@@ -56,31 +56,17 @@ const main = async () => {
   // Initialize leader election
   await initializeLeaderElection();
 
-  // Acquire leader lock (with retry for transient startup errors)
-  let lockAcquired = false;
-  const maxLockAttempts = 5;
-  for (let attempt = 1; attempt <= maxLockAttempts; attempt++) {
-    try {
-      await acquireLeaderLock();
-      lockAcquired = true;
-      break;
-    } catch (err) {
-      if (attempt < maxLockAttempts) {
-        log(
-          `⚠️ Failed to acquire leader lock (attempt ${attempt}/${maxLockAttempts}), retrying in 3s...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      } else {
-        log(
-          `❌ Failed to acquire leader lock after ${maxLockAttempts} attempts. This may indicate a configuration issue.`
-        );
-        throw err; // Re-throw on final attempt
-      }
-    }
-  }
-
-  if (!lockAcquired) {
-    log('❌ Could not acquire leader lock. Exiting.');
+  // Acquire leader lock
+  // Note: acquireLeaderLock() with waitUntilLock: true handles retries internally
+  // K8SLock will block until lock is acquired or throw on fatal errors
+  // We don't need a retry loop here - K8SLock handles it
+  try {
+    await acquireLeaderLock();
+  } catch (err) {
+    // If acquireLeaderLock throws, it means K8SLock gave up after all retries
+    // This is unusual and indicates a configuration/permission issue
+    log(`❌ Fatal error acquiring leader lock: ${err.message}`);
+    log('   This usually indicates a configuration or permission issue.');
     process.exit(1);
   }
 
@@ -149,10 +135,12 @@ const main = async () => {
     }
   }, 300000); // Reconcile every 5 minutes (drift detection)
 
-  // Start checking lease ownership in background
-  setInterval(() => isLeader(), 10000);
   // Start watching events only after taking ownership of the lease
   await watchResource();
+
+  // CRITICAL: Only start isLeader() check AFTER we're leader and watches are running
+  // Follower doesn't need to check leadership - the lock already handles that
+  setInterval(() => isLeader(), 10000);
 };
 
 main();

@@ -12,12 +12,13 @@ export let lock = null;
 // This is a workaround for K8SLock not creating the lease even with createLeaseIfNotExist: true
 export const ensureLeaseExists = async () => {
   const namespace = process.env.POD_NAMESPACE;
-  if (!namespace) {
-    log('⚠️ POD_NAMESPACE not set, cannot ensure lease exists');
+  const leaseName = 'qdrant-operator';
+
+  // CRITICAL: Validate parameters before API call to prevent client-side errors
+  if (!namespace || !leaseName || namespace === '' || leaseName === '') {
+    log('⚠️ POD_NAMESPACE or leaseName not set, cannot ensure lease exists');
     return;
   }
-
-  const leaseName = 'qdrant-operator';
 
   try {
     // Try to read the lease
@@ -25,13 +26,10 @@ export const ensureLeaseExists = async () => {
     log('✅ Lease already exists');
     return;
   } catch (err) {
-    // Check if lease doesn't exist (404) or if there's an error reading it
-    const errorCode =
-      err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
     const errorMsg = err.message || String(err);
     const errorBody = err.body || '';
 
-    // Parse error body if it's a string
+    // Parse error body safely (never parse undefined/null)
     let parsedBody = null;
     if (typeof errorBody === 'string' && errorBody) {
       try {
@@ -42,6 +40,9 @@ export const ensureLeaseExists = async () => {
     } else if (errorBody) {
       parsedBody = errorBody;
     }
+
+    // Get error code safely
+    const errorCode = err.code || err.statusCode || parsedBody?.code;
 
     const isNotFound =
       errorCode === 404 ||
@@ -138,14 +139,17 @@ export const ensureLeaseExists = async () => {
 // Check the current leader
 export const isLeader = async () => {
   const namespace = process.env.POD_NAMESPACE;
-  if (!namespace) {
-    log('❌ ERROR: POD_NAMESPACE not set, cannot check leader status');
+  const leaseName = 'qdrant-operator';
+
+  // CRITICAL: Validate parameters before API call to prevent client-side errors
+  if (!namespace || !leaseName || namespace === '' || leaseName === '') {
     leaderElection.set(0);
     return;
   }
+
   try {
     const res = await k8sCoordinationApi.readNamespacedLease(
-      'qdrant-operator',
+      leaseName,
       namespace
     );
 
@@ -249,14 +253,15 @@ export const acquireLeaderLock = async () => {
   let followerLogInterval = setInterval(async () => {
     try {
       const namespace = process.env.POD_NAMESPACE;
-      if (!namespace) {
-        log(
-          `Status of "${process.env.POD_NAME}": FOLLOWER. POD_NAMESPACE not set, cannot check leader status.`
-        );
-        return;
+      const leaseName = 'qdrant-operator';
+
+      // CRITICAL: Validate parameters before API call to prevent client-side errors
+      if (!namespace || !leaseName || namespace === '' || leaseName === '') {
+        return; // Silently skip if params not ready
       }
+
       const res = await k8sCoordinationApi.readNamespacedLease(
-        'qdrant-operator',
+        leaseName,
         namespace
       );
       const currentLeader = res.body.spec.holderIdentity;
@@ -309,11 +314,10 @@ export const acquireLeaderLock = async () => {
     log(
       `   If this persists, check lease permissions and API server connectivity.`
     );
-    // Don't exit - K8SLock with waitUntilLock: true should handle retries
-    // If it throws, it means it gave up after all retries, which is unusual
-    // In that case, we let the process continue and the periodic isLeader() check
-    // will handle the situation. The operator won't start watches until it's leader.
-    throw err; // Re-throw so caller knows acquisition failed
+    // Don't re-throw - K8SLock with waitUntilLock: true handles retries
+    // Re-throwing would create competing retry loops
+    // Let K8SLock handle retries internally
+    return; // Return without throwing - let K8SLock retry
   }
 
   // Clear the follower logging interval once we become leader
