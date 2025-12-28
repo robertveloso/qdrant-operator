@@ -39,7 +39,9 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: arm64
+          platforms: |
+            arm64
+            amd64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
@@ -59,12 +61,12 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.sha }}
-      - name: Build and push docker images for ARM64
+      - name: Build and push docker images multi-arch amd64 and arm64
         uses: docker/build-push-action@v5
         with:
           context: src/
           file: src/Dockerfile
-          platforms: linux/arm64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -83,9 +85,42 @@ jobs:
         run: |
           kubectl apply -f deploy/crds/
           IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
-          sed "s|image: .*$|image: ${IMAGE_TAG}|" deploy/operator.yaml | kubectl apply -f -
-          kubectl rollout status deploy/qdrant-operator -n qdrant-operator
-          kubectl logs -n qdrant-operator deploy/qdrant-operator
+          echo "Using image: ${IMAGE_TAG}"
+
+          # Reduce replicas to 1 for CI to speed up and reduce resource usage
+          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
+              -e "s|replicas: 3|replicas: 1|" \
+              deploy/operator.yaml | kubectl apply -f -
+
+          echo "Waiting for deployment rollout (timeout: 120s)..."
+          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s || {
+            echo "❌ Rollout failed or timed out. Checking pod status..."
+            kubectl get pods -n qdrant-operator -l app=qdrant-operator
+            echo ""
+            echo "📋 Deployment description:"
+            kubectl describe deployment qdrant-operator -n qdrant-operator
+            echo ""
+            echo "📋 Recent events:"
+            kubectl get events -n qdrant-operator --sort-by='.lastTimestamp' | tail -20
+            echo ""
+            echo "📋 Pod descriptions:"
+            kubectl get pods -n qdrant-operator -l app=qdrant-operator -o name | xargs -I {} kubectl describe {} -n qdrant-operator || true
+            echo ""
+            echo "📋 Pod logs:"
+            kubectl get pods -n qdrant-operator -l app=qdrant-operator -o name | xargs -I {} kubectl logs {} -n qdrant-operator --tail=30 || true
+            exit 1
+          }
+
+          echo "✅ Deployment successful. Waiting for pod to be ready (timeout: 60s)..."
+          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s || {
+            echo "❌ Pod not ready. Getting status..."
+            kubectl get pods -n qdrant-operator -l app=qdrant-operator
+            kubectl get pods -n qdrant-operator -l app=qdrant-operator -o name | xargs -I {} kubectl logs {} -n qdrant-operator --tail=30 || true
+            exit 1
+          }
+
+          echo "📋 Getting operator logs..."
+          kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
       - name: Integration test
         run: |
           kubectl apply -f examples/qdrant-cluster-minimal.yaml

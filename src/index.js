@@ -41,6 +41,25 @@ var clusterWatch = '';
 var collectionWatch = '';
 var clusterWatchStart = true;
 var collectionWatchStart = true;
+
+// Rate limiting and exponential backoff
+var reconnectAttempts = {
+  cluster: 0,
+  collection: 0
+};
+const MAX_RECONNECT_DELAY = 60000; // 60 segundos máximo
+const INITIAL_RECONNECT_DELAY = 2000; // Começar com 2 segundos
+
+// Calculate exponential backoff delay
+const getReconnectDelay = (attempts) => {
+  const delay = Math.min(
+    INITIAL_RECONNECT_DELAY * Math.pow(2, attempts),
+    MAX_RECONNECT_DELAY
+  );
+  // Add jitter to avoid thundering herd
+  const jitter = Math.random() * 1000;
+  return delay + jitter;
+};
 // load KubeConfig
 const kc = new k8s.KubeConfig();
 kc.loadFromDefault();
@@ -106,29 +125,65 @@ const onEventCollection = async (phase, apiObj) => {
 // QdrantClusters watch has stopped unexpectedly, restart
 const onDoneCluster = (err) => {
   if (err) {
-    log(`Connection to QdrantClusters closed with error: ${err.message}`);
+    const errorMsg = err.message || String(err);
+    log(`Connection to QdrantClusters closed with error: ${errorMsg}`);
+
+    // Special handling for rate limiting errors
+    if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
+      reconnectAttempts.cluster = Math.min(reconnectAttempts.cluster + 1, 10);
+      const delay = getReconnectDelay(reconnectAttempts.cluster);
+      log(`Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`);
+      clusterWatchStart = true;
+      setTimeout(() => {
+        watchResource();
+      }, delay);
+      return;
+    }
+    // For other errors, use smaller backoff
+    reconnectAttempts.cluster = Math.min(reconnectAttempts.cluster + 1, 5);
   } else {
+    // Normal closure, reset attempts
+    reconnectAttempts.cluster = 0;
     log(`Connection to QdrantClusters closed, reconnecting...`);
   }
+
   clusterWatchStart = true;
-  // Add delay to avoid tight reconnection loops
+  const delay = getReconnectDelay(reconnectAttempts.cluster);
   setTimeout(() => {
     watchResource();
-  }, 1000);
+  }, delay);
 };
 
 // QdrantCollections watch has stopped unexpectedly, restart
 const onDoneCollection = (err) => {
   if (err) {
-    log(`Connection to QdrantCollections closed with error: ${err.message}`);
+    const errorMsg = err.message || String(err);
+    log(`Connection to QdrantCollections closed with error: ${errorMsg}`);
+
+    // Special handling for rate limiting errors
+    if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
+      reconnectAttempts.collection = Math.min(reconnectAttempts.collection + 1, 10);
+      const delay = getReconnectDelay(reconnectAttempts.collection);
+      log(`Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`);
+      collectionWatchStart = true;
+      setTimeout(() => {
+        watchResource();
+      }, delay);
+      return;
+    }
+    // For other errors, use smaller backoff
+    reconnectAttempts.collection = Math.min(reconnectAttempts.collection + 1, 5);
   } else {
+    // Normal closure, reset attempts
+    reconnectAttempts.collection = 0;
     log(`Connection to QdrantCollections closed, reconnecting...`);
   }
+
   collectionWatchStart = true;
-  // Add delay to avoid tight reconnection loops
+  const delay = getReconnectDelay(reconnectAttempts.collection);
   setTimeout(() => {
     watchResource();
-  }, 1000);
+  }, delay);
 };
 
 const watchResource = async () => {
@@ -161,6 +216,7 @@ const watchResource = async () => {
     );
     log('Watching QdrantClusters API.');
     clusterWatchStart = false;
+    reconnectAttempts.cluster = 0; // Reset on successful start
   }
   if (collectionWatchStart) {
     watchList.push(
@@ -173,6 +229,7 @@ const watchResource = async () => {
     );
     log('Watching QdrantCollections API.');
     collectionWatchStart = false;
+    reconnectAttempts.collection = 0; // Reset on successful start
   }
   // return the first caught event from any watch
   return Promise.any(watchList);
@@ -330,8 +387,39 @@ const main = async () => {
   log(
     `Status of "${process.env.POD_NAME}": FOLLOWER. Trying to get leader status...`
   );
+
+  // Start periodic logging for followers while waiting
+  let followerLogInterval = setInterval(async () => {
+    try {
+      const namespace = process.env.POD_NAMESPACE;
+      const res = await k8sCoordinationApi.readNamespacedLease(
+        'qdrant-operator',
+        namespace
+      );
+      const currentLeader = res.body.spec.holderIdentity;
+      if (currentLeader && currentLeader !== process.env.POD_NAME) {
+        log(
+          `Status of "${process.env.POD_NAME}": FOLLOWER. Current leader is "${currentLeader}". Waiting...`
+        );
+      } else {
+        log(
+          `Status of "${process.env.POD_NAME}": FOLLOWER. No leader detected. Trying to acquire lock...`
+        );
+      }
+    } catch (err) {
+      log(
+        `Status of "${process.env.POD_NAME}": FOLLOWER. Checking leader status... (error: ${err.message})`
+      );
+    }
+  }, 10000); // Log every 10 seconds
+
   const lockInfo = await lock.startLocking();
+
+  // Clear the follower logging interval once we become leader
+  clearInterval(followerLogInterval);
+
   log(`Status of "${process.env.POD_NAME}": LEADER.`);
+  log(`✅ Successfully acquired leader lock. Starting operator services...`);
   // start checking lease ownership in background
   setInterval(() => isLeader(), 10000);
   // start watching events only after taking ownership of the lease
