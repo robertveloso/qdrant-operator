@@ -274,6 +274,43 @@ export const onDoneCollection = (err) => {
               `Scheduled reconciliation for collection "${collection.metadata.name}"`
             );
           }
+
+          // CRITICAL: Also schedule a delayed reconciliation check to catch any collections
+          // that might have been created right after we listed (race condition)
+          setTimeout(async () => {
+            try {
+              log(
+                'Performing delayed collection check to catch race conditions...'
+              );
+              const delayedList = await k8sCustomApi.listNamespacedCustomObject(
+                {
+                  group: 'qdrant.operator',
+                  version: 'v1alpha1',
+                  namespace: '',
+                  plural: 'qdrantcollections'
+                }
+              );
+              log(
+                `Delayed check found ${delayedList.items.length} collection(s)...`
+              );
+              for (const collection of delayedList.items) {
+                const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+                if (collection.metadata.deletionTimestamp) {
+                  continue;
+                }
+                // Check if we already processed this
+                if (!collectionCache.has(resourceKey)) {
+                  log(
+                    `🔍 Found new collection "${collection.metadata.name}" in delayed check, scheduling reconciliation...`
+                  );
+                  collectionCache.set(resourceKey, collection);
+                  scheduleReconcile(collection, 'collection');
+                }
+              }
+            } catch (delayedErr) {
+              log(`Error in delayed collection check: ${delayedErr.message}`);
+            }
+          }, 2000); // Check again after 2 seconds
         } catch (listErr) {
           log(`Error listing collections after reconnect: ${listErr.message}`);
           if (listErr.stack) {

@@ -336,20 +336,37 @@ export const reconcileCollection = async (apiObj) => {
     // CRITICAL: Check if cluster is ready before attempting to create/update collection
     // Collections can only be created when the cluster is in "Running" status
     let clusterStatus = null;
+    let clusterStatusRes = null;
     try {
-      const clusterStatusRes =
-        await k8sCustomApi.getNamespacedCustomObjectStatus({
+      clusterStatusRes = await k8sCustomApi.getNamespacedCustomObjectStatus({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantclusters',
+        name: clusterName
+      });
+      clusterStatus = clusterStatusRes.status?.qdrantStatus;
+    } catch (err) {
+      log(
+        `⚠️ Error checking cluster status for "${clusterName}": ${err.message}. Will retry later.`
+      );
+      // Try to get cluster object for debug info
+      try {
+        const clusterObj = await k8sCustomApi.getNamespacedCustomObject({
           group: 'qdrant.operator',
           version: 'v1alpha1',
           namespace: namespace,
           plural: 'qdrantclusters',
           name: clusterName
         });
-      clusterStatus = clusterStatusRes.status?.qdrantStatus;
-    } catch (err) {
-      log(
-        `⚠️ Error checking cluster status for "${clusterName}": ${err.message}. Will retry later.`
-      );
+        log(
+          `🔍 Debug: Cluster "${clusterName}" exists but status check failed. Cluster spec: replicas=${clusterObj.spec?.replicas || 'undefined'}, image=${clusterObj.spec?.image || 'undefined'}`
+        );
+      } catch (debugErr) {
+        log(
+          `🔍 Debug: Could not fetch cluster object for debugging: ${debugErr.message}`
+        );
+      }
       // Cluster might not exist yet or API error - schedule retry
       log(
         `⏰ Scheduling retry in 5 seconds due to cluster status check error...`
@@ -363,11 +380,83 @@ export const reconcileCollection = async (apiObj) => {
       return;
     }
 
-    // If cluster is not ready, schedule a retry
+    // If cluster is not ready, schedule a retry with detailed debug info
     if (clusterStatus !== 'Running') {
       log(
         `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}). Collection "${name}" will be created when cluster is ready.`
       );
+
+      // Debug: Get detailed cluster and StatefulSet information
+      try {
+        const clusterObj = await k8sCustomApi.getNamespacedCustomObject({
+          group: 'qdrant.operator',
+          version: 'v1alpha1',
+          namespace: namespace,
+          plural: 'qdrantclusters',
+          name: clusterName
+        });
+        log(
+          `🔍 Debug Cluster "${clusterName}": status=${clusterStatus || 'unknown'}, spec.replicas=${clusterObj.spec?.replicas || 'undefined'}, spec.image=${clusterObj.spec?.image || 'undefined'}`
+        );
+
+        // Check StatefulSet status
+        try {
+          const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
+            name: clusterName,
+            namespace: namespace
+          });
+          const sts = stsRes;
+          log(
+            `🔍 Debug StatefulSet "${clusterName}": replicas=${sts.spec?.replicas || 'undefined'}, readyReplicas=${sts.status?.readyReplicas || 0}, availableReplicas=${sts.status?.availableReplicas || 0}, updatedReplicas=${sts.status?.updatedReplicas || 0}`
+          );
+          if (
+            sts.status?.availableReplicas < sts.spec?.replicas ||
+            sts.status?.updatedReplicas < sts.spec?.replicas
+          ) {
+            log(
+              `🔍 Debug: StatefulSet not fully ready - waiting for ${sts.spec?.replicas - (sts.status?.availableReplicas || 0)} more pod(s) to become available`
+            );
+          }
+        } catch (stsErr) {
+          log(
+            `🔍 Debug: Could not read StatefulSet "${clusterName}": ${stsErr.message}`
+          );
+        }
+
+        // Check Pod status
+        try {
+          const podsRes = await k8sCoreApi.listNamespacedPod({
+            namespace: namespace,
+            labelSelector: `clustername=${clusterName}`
+          });
+          log(
+            `🔍 Debug Pods: Found ${podsRes.items.length} pod(s) for cluster "${clusterName}"`
+          );
+          for (const pod of podsRes.items) {
+            const podStatus = pod.status?.phase || 'unknown';
+            const ready = pod.status?.conditions?.find(
+              (c) => c.type === 'Ready'
+            )?.status;
+            log(
+              `🔍 Debug Pod "${pod.metadata.name}": phase=${podStatus}, ready=${ready || 'unknown'}, restartCount=${pod.status?.containerStatuses?.[0]?.restartCount || 0}`
+            );
+            if (pod.status?.containerStatuses?.[0]?.state?.waiting) {
+              log(
+                `🔍 Debug Pod "${pod.metadata.name}" waiting: reason=${pod.status.containerStatuses[0].state.waiting.reason || 'unknown'}, message=${pod.status.containerStatuses[0].state.waiting.message || 'none'}`
+              );
+            }
+          }
+        } catch (podsErr) {
+          log(
+            `🔍 Debug: Could not list pods for cluster "${clusterName}": ${podsErr.message}`
+          );
+        }
+      } catch (debugErr) {
+        log(
+          `🔍 Debug: Error getting debug info for cluster "${clusterName}": ${debugErr.message}`
+        );
+      }
+
       log(
         `⏰ Scheduling retry in 5 seconds (reduced from 10s for faster recovery)...`
       );
