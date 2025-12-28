@@ -272,7 +272,7 @@ export const watchResource = async () => {
     }
 
     const res = await safeReadNamespacedLease(nameParam, namespaceParam);
-    if (res.body.spec.holderIdentity !== process.env.POD_NAME) {
+    if (res?.spec?.holderIdentity !== process.env.POD_NAME) {
       log('Not the leader anymore, stopping watch...');
       return;
     }

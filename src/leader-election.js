@@ -417,7 +417,7 @@ export const isLeader = async () => {
     const res = await safeReadNamespacedLease(nameParam, namespaceParam);
 
     // Get holder identity (can be empty string, undefined, or a pod name)
-    const holder = res.body?.spec?.holderIdentity;
+    const holder = res?.spec?.holderIdentity;
 
     // CRITICAL: Empty holderIdentity means "no leader elected yet" (startup)
     // NOT "leader lost". Only trigger shutdown if we were leader and lost it.
@@ -575,7 +575,7 @@ export const acquireLeaderLock = async () => {
       }
 
       const res = await safeReadNamespacedLease(nameParam, namespaceParam);
-      const currentLeader = res.body.spec.holderIdentity;
+      const currentLeader = res?.spec?.holderIdentity;
       if (currentLeader && currentLeader !== process.env.POD_NAME) {
         log(
           `Status of "${process.env.POD_NAME}": FOLLOWER. Current leader is "${currentLeader}". Waiting...`
