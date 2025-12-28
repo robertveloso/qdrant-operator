@@ -10,7 +10,7 @@ import {
 } from './state.js';
 import { addFinalizer, removeFinalizer } from './finalizers.js';
 import { cleanupCluster, cleanupCollection } from './cleanup.js';
-import { scheduleReconcile } from './reconciliation.js';
+import { scheduleReconcile, reconcileCollection } from './reconciliation.js';
 import {
   reconcileTotal,
   reconcileDuration,
@@ -169,7 +169,7 @@ export const onEventCollection = async (phase, apiObj) => {
       collectionCache.delete(resourceKey);
     }
     log(
-      `Received event in phase ${phase} for collection "${name}" in namespace "${namespace}".`
+      `📥 Received event in phase ${phase} for collection "${name}" in namespace "${namespace}".`
     );
 
     // Handle deletion with finalizer
@@ -203,12 +203,38 @@ export const onEventCollection = async (phase, apiObj) => {
     }
 
     // Ensure finalizer is present
-    await addFinalizer(apiObj, 'qdrantcollections');
+    try {
+      await addFinalizer(apiObj, 'qdrantcollections');
+      log(`✅ Finalizer added/verified for collection "${name}"`);
+    } catch (finalizerErr) {
+      log(
+        `❌ Error adding finalizer to collection "${name}": ${finalizerErr.message}`
+      );
+      // Continue anyway - reconciliation can proceed without finalizer initially
+      // Finalizer will be added on next event or periodic reconciliation
+    }
 
     // Enqueue reconciliation (declarative model)
     if (['ADDED', 'MODIFIED'].includes(phase)) {
       try {
         scheduleReconcile(apiObj, 'collection');
+        log(`✅ Scheduled reconciliation for collection "${name}"`);
+
+        // CRITICAL: Also trigger immediate reconciliation for ADDED events
+        // This ensures collection is processed even if scheduled one fails or is delayed
+        if (phase === 'ADDED') {
+          log(
+            `🚀 Triggering immediate reconciliation for new collection "${name}"...`
+          );
+          // Don't await - let it run in background, scheduled one will also run
+          reconcileCollection(apiObj).catch((err) => {
+            log(
+              `⚠️ Immediate reconciliation failed for "${name}": ${err.message}. Scheduled reconciliation will still run.`
+            );
+            // Scheduled one will still run, so this is not critical
+          });
+        }
+
         reconcileTotal.inc({ resource_type: 'collection', result: 'success' });
       } catch (err) {
         log(`Error scheduling collection reconciliation: ${err.message}`);
