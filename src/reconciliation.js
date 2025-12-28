@@ -108,8 +108,11 @@ export const reconcileCluster = async (apiObj) => {
   } else {
     // Fallback to API call if not in cache (source of truth)
     try {
-      const res = await k8sAppsApi.readNamespacedStatefulSet(name, namespace);
-      observedStatefulSet = res.body;
+      const res = await k8sAppsApi.readNamespacedStatefulSet({
+        name: name,
+        namespace: namespace
+      });
+      observedStatefulSet = res;
       statefulSetCache.set(resourceKey, observedStatefulSet);
     } catch (err) {
       if (!err.message.includes('not found')) {
@@ -136,8 +139,11 @@ export const reconcileCluster = async (apiObj) => {
 
     // Update cache after creating
     try {
-      const res = await k8sAppsApi.readNamespacedStatefulSet(name, namespace);
-      statefulSetCache.set(resourceKey, res.body);
+      const res = await k8sAppsApi.readNamespacedStatefulSet({
+        name: name,
+        namespace: namespace
+      });
+      statefulSetCache.set(resourceKey, res);
     } catch (err) {
       // Ignore cache update errors
     }
@@ -216,8 +222,11 @@ export const reconcileCluster = async (apiObj) => {
 
     // Update cache after applying
     try {
-      const res = await k8sAppsApi.readNamespacedStatefulSet(name, namespace);
-      statefulSetCache.set(resourceKey, res.body);
+      const res = await k8sAppsApi.readNamespacedStatefulSet({
+        name: name,
+        namespace: namespace
+      });
+      statefulSetCache.set(resourceKey, res);
     } catch (err) {
       // Ignore cache update errors
     }
@@ -247,11 +256,11 @@ export const reconcileCluster = async (apiObj) => {
       // Only update status if it's not already Running
       if (currentStatus.body.status?.qdrantStatus !== 'Running') {
         // Check if StatefulSet is actually ready
-        const stsRes = await k8sAppsApi.readNamespacedStatefulSet(
-          name,
-          namespace
-        );
-        const sts = stsRes.body;
+        const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
+          name: name,
+          namespace: namespace
+        });
+        const sts = stsRes;
         if (
           sts.status?.availableReplicas >= sts.spec.replicas &&
           sts.status?.updatedReplicas >= sts.spec.replicas

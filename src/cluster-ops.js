@@ -66,22 +66,22 @@ export const applyCluster = async (apiObj, k8sAppsApi, k8sCoreApi) => {
   var newClusterTemplate = clusterTemplate(apiObj);
   try {
     // trying to read statefulset
-    const res = await k8sAppsApi.readNamespacedStatefulSet(
-      `${name}`,
-      `${namespace}`
-    );
-    const cluster = res.body;
+    const res = await k8sAppsApi.readNamespacedStatefulSet({
+      name: name,
+      namespace: namespace
+    });
+    const cluster = res;
     // write warning in case of replicas number decreasing
     if (apiObj.spec.replicas < cluster.spec.replicas) {
       log(`Warning: downscaling the cluster may result in data loss!`);
     }
     // update statefulset
     log(`StatefulSet "${name}" already exists! Trying to update...`);
-    k8sAppsApi.replaceNamespacedStatefulSet(
-      `${name}`,
-      `${namespace}`,
-      newClusterTemplate
-    );
+    await k8sAppsApi.replaceNamespacedStatefulSet({
+      name: name,
+      namespace: namespace,
+      body: newClusterTemplate
+    });
     log(`StatefulSet "${name}" was successfully updated!`);
     return;
   } catch (err) {
@@ -89,7 +89,10 @@ export const applyCluster = async (apiObj, k8sAppsApi, k8sCoreApi) => {
   }
   try {
     // create statefulset if can't read
-    k8sAppsApi.createNamespacedStatefulSet(`${namespace}`, newClusterTemplate);
+    await k8sAppsApi.createNamespacedStatefulSet({
+      namespace: namespace,
+      body: newClusterTemplate
+    });
     log(`StatefulSet "${name}" was successfully created!`);
   } catch (err) {
     log(err);

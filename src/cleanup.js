@@ -70,11 +70,11 @@ export const cleanupCluster = async (apiObj) => {
 
       // Scale down StatefulSet to 0 replicas gracefully
       try {
-        const stsRes = await k8sAppsApi.readNamespacedStatefulSet(
-          name,
-          namespace
-        );
-        const sts = stsRes.body;
+        const stsRes = await k8sAppsApi.readNamespacedStatefulSet({
+          name: name,
+          namespace: namespace
+        });
+        const sts = stsRes;
         if (sts.spec.replicas > 0) {
           log(`Scaling down StatefulSet "${name}" to 0 replicas...`);
           const patch = [

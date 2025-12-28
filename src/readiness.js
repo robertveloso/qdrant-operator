@@ -147,11 +147,11 @@ export const waitForClusterReadiness = (apiObj) => {
         const name = apiObj.metadata.name;
         const namespace = apiObj.metadata.namespace;
         try {
-          const res = await k8sAppsApi.readNamespacedStatefulSet(
-            `${name}`,
-            `${namespace}`
-          );
-          const stset = res.body;
+          const res = await k8sAppsApi.readNamespacedStatefulSet({
+            name: name,
+            namespace: namespace
+          });
+          const stset = res;
           if (
             stset.status.availableReplicas >= stset.spec.replicas &&
             stset.status.updatedReplicas >= stset.spec.replicas

@@ -67,6 +67,26 @@ const safeReadNamespacedLease = async (name, namespace) => {
   } catch (err) {
     // If that fails, try with positional arguments (for regular CoordinationV1Api)
     const errorMsg = err.message || String(err);
+    const errorBody = err.body || '';
+
+    // Check if it's a 404 error (lease not found - expected on first run)
+    let parsedBody = null;
+    if (typeof errorBody === 'string' && errorBody) {
+      try {
+        parsedBody = JSON.parse(errorBody);
+      } catch (e) {
+        // Ignore parse errors
+      }
+    } else if (errorBody) {
+      parsedBody = errorBody;
+    }
+
+    const errorCode = err.code || err.statusCode || parsedBody?.code;
+    const isNotFound = errorCode === 404 ||
+      (parsedBody && parsedBody.code === 404) ||
+      errorMsg.includes('not found') ||
+      errorMsg.includes('NotFound');
+
     if (
       errorMsg.includes('Required parameter') ||
       errorMsg.includes('was null or undefined')
@@ -81,7 +101,17 @@ const safeReadNamespacedLease = async (name, namespace) => {
         namespace: namespaceStr
       });
     }
-    // Log detailed error information if in debug mode
+
+    // For 404 errors, don't log as error (expected when lease doesn't exist)
+    if (isNotFound) {
+      // Only log in debug mode, and as info not error
+      if (process.env.DEBUG_MODE === 'true') {
+        log(`Lease not found (404) - this is expected on first run`);
+      }
+      throw err; // Re-throw so caller can handle it
+    }
+
+    // Log detailed error information for other errors (only in debug mode)
     if (process.env.DEBUG_MODE === 'true') {
       log(`Error in safeReadNamespacedLease: ${errorMsg}`);
       log(
