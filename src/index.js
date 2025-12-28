@@ -457,7 +457,28 @@ const main = async () => {
     }
   }, 10000); // Log every 10 seconds
 
-  await lock.startLocking();
+  try {
+    log(`Attempting to acquire leader lock in namespace: ${process.env.POD_NAMESPACE}`);
+    // Small delay to ensure namespace is fully available
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await lock.startLocking();
+  } catch (err) {
+    const errorMsg = err.message || String(err);
+    const errorBody = err.body || '';
+    log(`❌ Failed to acquire leader lock: ${errorMsg}`);
+    if (errorBody) {
+      try {
+        const errorJson = typeof errorBody === 'string' ? JSON.parse(errorBody) : errorBody;
+        log(`   Error details: ${JSON.stringify(errorJson)}`);
+      } catch (e) {
+        log(`   Error body: ${errorBody}`);
+      }
+    }
+    log(`   POD_NAMESPACE: ${process.env.POD_NAMESPACE || 'UNDEFINED'}`);
+    log(`   POD_NAME: ${process.env.POD_NAME || 'UNDEFINED'}`);
+    log(`   This is a fatal error. The operator cannot continue without leader election.`);
+    process.exit(1);
+  }
 
   // Clear the follower logging interval once we become leader
   clearInterval(followerLogInterval);

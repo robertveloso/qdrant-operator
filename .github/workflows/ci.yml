@@ -128,6 +128,24 @@ jobs:
 
           echo "📋 Getting operator logs..."
           kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
+
+          echo "⏳ Waiting for operator to become leader (timeout: 30s)..."
+          timeout=30
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            if kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=10 2>/dev/null | grep -q "LEADER"; then
+              echo "✅ Operator is LEADER!"
+              break
+            fi
+            echo "   Waiting for operator to become leader... (${elapsed}s/${timeout}s)"
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
+
+          if ! kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=10 2>/dev/null | grep -q "LEADER"; then
+            echo "⚠️ Warning: Operator may not be leader yet, but continuing..."
+            kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=20
+          fi
       - name: Integration test
         run: |
           echo "📦 Creating Qdrant cluster..."
