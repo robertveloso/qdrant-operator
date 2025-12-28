@@ -37,12 +37,27 @@ const safeReadNamespacedLease = async (name, namespace) => {
   }
 
   // Call the API with validated and converted parameters
+  // Try using object parameter format as the library may expect it
   try {
-    return await k8sCoordinationApi.readNamespacedLease(nameStr, namespaceStr);
+    // First try with object parameter format (for ObjectCoordinationV1Api)
+    return await k8sCoordinationApi.readNamespacedLease({
+      name: nameStr,
+      namespace: namespaceStr
+    });
   } catch (err) {
+    // If that fails, try with positional arguments (for regular CoordinationV1Api)
+    const errorMsg = err.message || String(err);
+    if (errorMsg.includes('Required parameter') || errorMsg.includes('was null or undefined')) {
+      // Log detailed error information if in debug mode
+      if (process.env.DEBUG_MODE === 'true') {
+        log(`Error with object format, trying positional: ${errorMsg}`);
+      }
+      // Fallback to positional arguments
+      return await k8sCoordinationApi.readNamespacedLease(nameStr, namespaceStr);
+    }
     // Log detailed error information if in debug mode
     if (process.env.DEBUG_MODE === 'true') {
-      log(`Error in safeReadNamespacedLease: ${err.message || String(err)}`);
+      log(`Error in safeReadNamespacedLease: ${errorMsg}`);
       log(`   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`);
       log(`   Error stack: ${err.stack || 'No stack trace'}`);
     }
