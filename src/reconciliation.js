@@ -50,10 +50,14 @@ export const scheduleReconcile = (apiObj, resourceType) => {
   const resourceKey = `${namespace}/${name}`;
   // If already scheduled for this resource, skip (prevents duplicate processing)
   if (applyQueue.has(resourceKey)) {
-    log(`Reconciliation already scheduled for ${resourceType} "${name}", skipping...`);
+    log(
+      `Reconciliation already scheduled for ${resourceType} "${name}", skipping...`
+    );
     return;
   }
-  log(`Scheduling reconciliation for ${resourceType} "${name}" in namespace "${namespace}"`);
+  log(
+    `Scheduling reconciliation for ${resourceType} "${name}" in namespace "${namespace}"`
+  );
   // Schedule reconcile with debounce (1 second delay)
   const timeout = setTimeout(async () => {
     // Check again before starting reconcile (may have started shutting down during debounce)
@@ -81,7 +85,9 @@ export const scheduleReconcile = (apiObj, resourceType) => {
       }
       log(`✅ Completed reconciliation for ${resourceType} "${name}"`);
     } catch (err) {
-      log(`❌ Error in reconciliation for ${resourceType} "${name}": ${err.message}`);
+      log(
+        `❌ Error in reconciliation for ${resourceType} "${name}": ${err.message}`
+      );
       if (err.stack) {
         log(`   Stack: ${err.stack}`);
       }
@@ -291,12 +297,55 @@ export const reconcileCollection = async (apiObj) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
+  const clusterName = apiObj.spec.cluster;
 
-  log(`Starting reconciliation for collection "${name}" in namespace "${namespace}"`);
+  log(
+    `Starting reconciliation for collection "${name}" in namespace "${namespace}"`
+  );
 
   // For collections, reconciliation is simpler - just ensure it exists in Qdrant
   // The actual collection creation/update is handled by createCollection/updateCollection
   try {
+    // CRITICAL: Check if cluster is ready before attempting to create/update collection
+    // Collections can only be created when the cluster is in "Running" status
+    let clusterStatus = null;
+    try {
+      const clusterStatusRes =
+        await k8sCustomApi.getNamespacedCustomObjectStatus({
+          group: 'qdrant.operator',
+          version: 'v1alpha1',
+          namespace: namespace,
+          plural: 'qdrantclusters',
+          name: clusterName
+        });
+      clusterStatus = clusterStatusRes.status?.qdrantStatus;
+    } catch (err) {
+      log(
+        `⚠️ Error checking cluster status for "${clusterName}": ${err.message}. Will retry later.`
+      );
+      // Cluster might not exist yet or API error - schedule retry
+      setTimeout(() => {
+        scheduleReconcile(apiObj, 'collection');
+      }, 10000); // Retry in 10 seconds
+      return;
+    }
+
+    // If cluster is not ready, schedule a retry
+    if (clusterStatus !== 'Running') {
+      log(
+        `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}). Collection "${name}" will be created when cluster is ready.`
+      );
+      // Schedule retry after delay
+      setTimeout(() => {
+        scheduleReconcile(apiObj, 'collection');
+      }, 10000); // Retry in 10 seconds
+      return;
+    }
+
+    log(
+      `✅ Cluster "${clusterName}" is ready (status: ${clusterStatus}), proceeding with collection reconciliation...`
+    );
+
     // Check if collection exists in cache (fast read for optimization)
     // NOTE: createCollection/updateCollection will verify actual state via Qdrant API (source of truth)
     // Cache rule: cache → fast reads, API → critical decisions
@@ -322,7 +371,11 @@ export const reconcileCollection = async (apiObj) => {
       log(`   Stack: ${err.stack}`);
     }
     errorsTotal.inc({ type: 'reconcile' });
-    throw err;
+    // Don't throw - schedule retry instead to allow recovery
+    // This prevents the error from being lost if it's a transient issue
+    setTimeout(() => {
+      scheduleReconcile(apiObj, 'collection');
+    }, 10000); // Retry in 10 seconds
   }
 };
 

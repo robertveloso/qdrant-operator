@@ -36,7 +36,9 @@ const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     }
     return parameters;
   } catch (err) {
-    log(`Error getting connection parameters for collection "${name}" in cluster "${clusterName}": ${err.message}`);
+    log(
+      `Error getting connection parameters for collection "${name}" in cluster "${clusterName}": ${err.message}`
+    );
     throw err;
   }
 };
@@ -201,8 +203,41 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     });
     const data = await resp.json();
     log(`Status: "${JSON.stringify(data.status)}", time: "${data.time}".`);
-    if (data.status && data.status.error) {
-      log(`⚠️ Collection creation returned error: ${JSON.stringify(data.status.error)}`);
+
+    // Check HTTP status code
+    if (!resp.ok) {
+      const errorMsg =
+        data.status?.error || `HTTP ${resp.status}: ${resp.statusText}`;
+      log(
+        `❌ Collection creation failed with HTTP ${resp.status}: ${JSON.stringify(errorMsg)}`
+      );
+      throw new Error(`Failed to create collection: ${errorMsg}`);
+    }
+
+    // Check for errors in response body
+    // Qdrant API returns { status: { error: "..." } } on error, or { status: "ok" } on success
+    if (data.status && typeof data.status === 'object' && data.status.error) {
+      const errorMsg = JSON.stringify(data.status.error);
+      log(`❌ Collection creation returned error: ${errorMsg}`);
+      throw new Error(`Collection creation failed: ${errorMsg}`);
+    }
+
+    // Verify success - Qdrant returns status: "ok" on success
+    if (data.status === 'ok') {
+      log(`✅ Collection "${name}" created successfully`);
+    } else if (
+      data.status &&
+      typeof data.status === 'object' &&
+      !data.status.error
+    ) {
+      // Some Qdrant versions might return different success format
+      log(
+        `✅ Collection "${name}" created successfully (status: ${JSON.stringify(data.status)})`
+      );
+    } else {
+      log(
+        `⚠️ Unexpected response format for collection "${name}": ${JSON.stringify(data.status)}`
+      );
     }
   } catch (err) {
     log(`❌ Error creating collection "${name}": ${err.message}`);
