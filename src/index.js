@@ -2,8 +2,7 @@ import { k8sCustomApi } from './k8s-client.js';
 import {
   applyQueue,
   clusterCache,
-  collectionCache,
-  reconcileQueueDepth
+  collectionCache
 } from './state.js';
 import {
   initializeLeaderElection,
@@ -17,6 +16,7 @@ import {
   clustersManaged,
   collectionsManaged,
   errorsTotal,
+  reconcileQueueDepth,
   startMetricsServer
 } from './metrics.js';
 import { log } from './utils.js';

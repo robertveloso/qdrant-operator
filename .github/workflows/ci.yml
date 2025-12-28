@@ -126,9 +126,14 @@ jobs:
           echo "📋 Verifying environment variables in pod..."
           POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
           echo "   POD_NAME: ${POD_NAME}"
-          kubectl exec -n qdrant-operator ${POD_NAME} -- env | grep -E "POD_NAME|POD_NAMESPACE" || {
-            echo "⚠️ Warning: Could not verify environment variables"
-          }
+          # Wait a moment for container to be fully ready
+          sleep 2
+          # Try to verify env vars, but don't fail if it doesn't work (non-critical check)
+          if kubectl exec -n qdrant-operator ${POD_NAME} -c operator -- env 2>/dev/null | grep -E "POD_NAME|POD_NAMESPACE"; then
+            echo "✅ Environment variables verified"
+          else
+            echo "⚠️ Warning: Could not verify environment variables (this is non-critical, pod is ready)"
+          fi
 
           echo "📋 Getting operator logs..."
           kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
