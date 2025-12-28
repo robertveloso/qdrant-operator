@@ -77,7 +77,7 @@ export const scheduleReconcile = (apiObj, resourceType) => {
     activeReconciles.add(resourceKey);
 
     try {
-      log(`Starting reconciliation for ${resourceType} "${name}"...`);
+      log(`🚀 Starting reconciliation for ${resourceType} "${name}"...`);
       if (resourceType === 'cluster') {
         await reconcileCluster(apiObj);
       } else if (resourceType === 'collection') {
@@ -351,9 +351,15 @@ export const reconcileCollection = async (apiObj) => {
         `⚠️ Error checking cluster status for "${clusterName}": ${err.message}. Will retry later.`
       );
       // Cluster might not exist yet or API error - schedule retry
+      log(
+        `⏰ Scheduling retry in 5 seconds due to cluster status check error...`
+      );
       setTimeout(() => {
+        log(
+          `🔄 Retrying reconciliation for collection "${name}" after cluster status check error...`
+        );
         scheduleReconcile(currentCollection, 'collection');
-      }, 10000); // Retry in 10 seconds
+      }, 5000); // Retry in 5 seconds (reduced from 10s)
       return;
     }
 
@@ -362,10 +368,14 @@ export const reconcileCollection = async (apiObj) => {
       log(
         `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}). Collection "${name}" will be created when cluster is ready.`
       );
-      // Schedule retry after delay
+      log(
+        `⏰ Scheduling retry in 5 seconds (reduced from 10s for faster recovery)...`
+      );
+      // Schedule retry after delay (reduced to 5 seconds for faster recovery)
       setTimeout(() => {
+        log(`🔄 Retrying reconciliation for collection "${name}"...`);
         scheduleReconcile(currentCollection, 'collection');
-      }, 10000); // Retry in 10 seconds
+      }, 5000); // Retry in 5 seconds (reduced from 10s)
       return;
     }
 
@@ -425,14 +435,22 @@ export const reconcileCollection = async (apiObj) => {
         plural: 'qdrantcollections',
         name: name
       });
+      log(`⏰ Scheduling retry in 5 seconds after error...`);
       setTimeout(() => {
+        log(
+          `🔄 Retrying reconciliation for collection "${name}" after error...`
+        );
         scheduleReconcile(latestCollection, 'collection');
-      }, 10000); // Retry in 10 seconds
+      }, 5000); // Retry in 5 seconds (reduced from 10s)
     } catch (fetchErr) {
       // If we can't fetch latest, use provided object
+      log(`⏰ Scheduling retry in 5 seconds (using provided object)...`);
       setTimeout(() => {
+        log(
+          `🔄 Retrying reconciliation for collection "${name}" after error (using provided object)...`
+        );
         scheduleReconcile(apiObj, 'collection');
-      }, 10000); // Retry in 10 seconds
+      }, 5000); // Retry in 5 seconds (reduced from 10s)
     }
   }
 };

@@ -171,6 +171,9 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
 
 export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
+  log(
+    `🎯 createCollection called for "${name}" in cluster "${apiObj.spec.cluster}"`
+  );
   try {
     const parameters = await getConnectionParameters(
       apiObj,
