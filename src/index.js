@@ -133,7 +133,7 @@ const main = async () => {
       log(`Error in periodic reconciliation: ${err.message}`);
       errorsTotal.inc({ type: 'periodic_reconcile' });
     }
-  }, 300000); // Reconcile every 5 minutes (drift detection)
+  }, 30000); // Reconcile every 30 seconds (reduced from 5 minutes for faster recovery)
 
   // Start watching events only after taking ownership of the lease
   await watchResource();

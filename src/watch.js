@@ -333,6 +333,50 @@ export const onDoneCollection = (err) => {
     reconnectAttempts.collection = 0;
     log(`Connection to QdrantCollections closed, reconnecting...`);
     watchRestarts.inc({ resource_type: 'collection', reason: 'normal' });
+
+    // CRITICAL: List collections when reconnecting to catch any missed events
+    // This ensures we don't miss collections created while watch was down
+    const delay = getReconnectDelay(reconnectAttempts.collection);
+    setTimeout(async () => {
+      try {
+        log(
+          'Listing collections after normal reconnect to catch missed events...'
+        );
+        const collectionList = await k8sCustomApi.listNamespacedCustomObject({
+          group: 'qdrant.operator',
+          version: 'v1alpha1',
+          namespace: '',
+          plural: 'qdrantcollections'
+        });
+        log(
+          `Found ${collectionList.items.length} collection(s) after normal reconnect, processing...`
+        );
+        for (const collection of collectionList.items) {
+          const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+          // Skip if deletion is in progress
+          if (collection.metadata.deletionTimestamp) {
+            continue;
+          }
+          // Only reconcile if not already in cache (avoid duplicate processing)
+          if (!collectionCache.has(resourceKey)) {
+            log(
+              `Processing collection "${collection.metadata.name}" from normal reconnect list...`
+            );
+            collectionCache.set(resourceKey, collection);
+            scheduleReconcile(collection, 'collection');
+            log(
+              `Scheduled reconciliation for collection "${collection.metadata.name}"`
+            );
+          }
+        }
+      } catch (listErr) {
+        log(
+          `Error listing collections after normal reconnect: ${listErr.message}`
+        );
+      }
+      watchResource();
+    }, delay);
+    return;
   }
 
   const delay = getReconnectDelay(reconnectAttempts.collection);
