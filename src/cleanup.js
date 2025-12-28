@@ -85,14 +85,14 @@ export const cleanupCluster = async (apiObj) => {
             }
           ];
           await k8sAppsApi.patchNamespacedStatefulSet(
-            name,
-            namespace,
-            patch,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            { headers: { 'Content-Type': 'application/json-patch+json' } }
+            {
+              name: name,
+              namespace: namespace,
+              body: patch
+            },
+            {
+              headers: { 'Content-Type': 'application/json-patch+json' }
+            }
           );
           // Wait a bit for graceful shutdown
           await new Promise((resolve) => setTimeout(resolve, 2000));
