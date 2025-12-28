@@ -213,13 +213,25 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     } catch (fetchErr) {
       if (fetchErr.name === 'AbortError') {
         log(`❌ Request to Qdrant API timed out after 30 seconds`);
-        throw new Error(`Request timeout: Failed to create collection "${name}" - Qdrant API did not respond within 30 seconds`);
-      } else if (fetchErr.code === 'ECONNREFUSED' || fetchErr.message.includes('ECONNREFUSED')) {
+        throw new Error(
+          `Request timeout: Failed to create collection "${name}" - Qdrant API did not respond within 30 seconds`
+        );
+      } else if (
+        fetchErr.code === 'ECONNREFUSED' ||
+        fetchErr.message.includes('ECONNREFUSED')
+      ) {
         log(`❌ Connection refused to Qdrant API at ${parameters.url}`);
-        throw new Error(`Connection refused: Cannot connect to Qdrant cluster "${apiObj.spec.cluster}". Is the cluster running?`);
-      } else if (fetchErr.code === 'ENOTFOUND' || fetchErr.message.includes('ENOTFOUND')) {
+        throw new Error(
+          `Connection refused: Cannot connect to Qdrant cluster "${apiObj.spec.cluster}". Is the cluster running?`
+        );
+      } else if (
+        fetchErr.code === 'ENOTFOUND' ||
+        fetchErr.message.includes('ENOTFOUND')
+      ) {
         log(`❌ DNS resolution failed for Qdrant API at ${parameters.url}`);
-        throw new Error(`DNS resolution failed: Cannot resolve hostname for cluster "${apiObj.spec.cluster}"`);
+        throw new Error(
+          `DNS resolution failed: Cannot resolve hostname for cluster "${apiObj.spec.cluster}"`
+        );
       } else {
         log(`❌ Network error connecting to Qdrant API: ${fetchErr.message}`);
         throw new Error(`Network error: ${fetchErr.message}`);
@@ -238,8 +250,12 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     } catch (parseErr) {
       log(`❌ Failed to parse response from Qdrant API: ${parseErr.message}`);
       log(`   Response status: ${resp.status} ${resp.statusText}`);
-      log(`   Response headers: ${JSON.stringify(Object.fromEntries(resp.headers.entries()))}`);
-      throw new Error(`Invalid JSON response from Qdrant API: ${parseErr.message}`);
+      log(
+        `   Response headers: ${JSON.stringify(Object.fromEntries(resp.headers.entries()))}`
+      );
+      throw new Error(
+        `Invalid JSON response from Qdrant API: ${parseErr.message}`
+      );
     }
 
     log(

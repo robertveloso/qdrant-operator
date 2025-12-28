@@ -297,10 +297,17 @@ export const reconcileCollection = async (apiObj) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
-  const clusterName = apiObj.spec.cluster;
+  const clusterName = apiObj.spec?.cluster;
+
+  if (!clusterName) {
+    log(
+      `❌ Collection "${name}" has no cluster specified in spec.cluster. Cannot reconcile.`
+    );
+    return;
+  }
 
   log(
-    `Starting reconciliation for collection "${name}" in namespace "${namespace}"`
+    `🔄 Starting reconciliation for collection "${name}" in namespace "${namespace}" (cluster: "${clusterName}")`
   );
 
   // For collections, reconciliation is simpler - just ensure it exists in Qdrant
@@ -365,6 +372,9 @@ export const reconcileCollection = async (apiObj) => {
     log(
       `✅ Cluster "${clusterName}" is ready (status: ${clusterStatus}), proceeding with collection reconciliation...`
     );
+    log(
+      `📋 Collection spec: cluster="${clusterName}", vectorSize=${currentCollection.spec.vectorSize || 'undefined'}, shardNumber=${currentCollection.spec.shardNumber || 'undefined'}, replicationFactor=${currentCollection.spec.replicationFactor || 'undefined'}`
+    );
 
     // CRITICAL FIX: Always try createCollection first
     // PUT is idempotent in Qdrant - if collection exists, it will succeed anyway
@@ -377,7 +387,7 @@ export const reconcileCollection = async (apiObj) => {
     // Always try to create first (PUT is idempotent in Qdrant)
     // If collection already exists, PUT will succeed and update it if needed
     log(
-      `Creating/updating collection "${name}" in cluster "${clusterName}"...`
+      `🚀 Attempting to create/update collection "${name}" in cluster "${clusterName}"...`
     );
     try {
       await createCollection(currentCollection, k8sCustomApi, k8sCoreApi);
