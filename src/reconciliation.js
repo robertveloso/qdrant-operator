@@ -50,8 +50,10 @@ export const scheduleReconcile = (apiObj, resourceType) => {
   const resourceKey = `${namespace}/${name}`;
   // If already scheduled for this resource, skip (prevents duplicate processing)
   if (applyQueue.has(resourceKey)) {
+    log(`Reconciliation already scheduled for ${resourceType} "${name}", skipping...`);
     return;
   }
+  log(`Scheduling reconciliation for ${resourceType} "${name}" in namespace "${namespace}"`);
   // Schedule reconcile with debounce (1 second delay)
   const timeout = setTimeout(async () => {
     // Check again before starting reconcile (may have started shutting down during debounce)
@@ -71,11 +73,19 @@ export const scheduleReconcile = (apiObj, resourceType) => {
     activeReconciles.add(resourceKey);
 
     try {
+      log(`Starting reconciliation for ${resourceType} "${name}"...`);
       if (resourceType === 'cluster') {
         await reconcileCluster(apiObj);
       } else if (resourceType === 'collection') {
         await reconcileCollection(apiObj);
       }
+      log(`✅ Completed reconciliation for ${resourceType} "${name}"`);
+    } catch (err) {
+      log(`❌ Error in reconciliation for ${resourceType} "${name}": ${err.message}`);
+      if (err.stack) {
+        log(`   Stack: ${err.stack}`);
+      }
+      throw err;
     } finally {
       // Remove from active reconciles when done
       activeReconciles.delete(resourceKey);
@@ -280,6 +290,9 @@ export const reconcileCluster = async (apiObj) => {
 export const reconcileCollection = async (apiObj) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
+  const resourceKey = `${namespace}/${name}`;
+
+  log(`Starting reconciliation for collection "${name}" in namespace "${namespace}"`);
 
   // For collections, reconciliation is simpler - just ensure it exists in Qdrant
   // The actual collection creation/update is handled by createCollection/updateCollection
@@ -287,22 +300,27 @@ export const reconcileCollection = async (apiObj) => {
     // Check if collection exists in cache (fast read for optimization)
     // NOTE: createCollection/updateCollection will verify actual state via Qdrant API (source of truth)
     // Cache rule: cache → fast reads, API → critical decisions
-    const resourceKey = `${namespace}/${name}`;
     const cachedCollection = collectionCache.get(resourceKey);
 
     if (cachedCollection) {
+      log(`Collection "${name}" found in cache, updating if needed...`);
       // Collection exists in cache, update if needed
       // updateCollection will verify actual state via Qdrant API
       await updateCollection(apiObj, k8sCustomApi, k8sCoreApi);
       await applyJobs(apiObj, k8sCustomApi, k8sBatchApi);
     } else {
+      log(`Collection "${name}" not in cache, creating...`);
       // Collection doesn't exist in cache, create it
       // createCollection will verify actual state via Qdrant API
       await createCollection(apiObj, k8sCustomApi, k8sCoreApi);
       await applyJobs(apiObj, k8sCustomApi, k8sBatchApi);
     }
+    log(`✅ Completed reconciliation for collection "${name}"`);
   } catch (err) {
-    log(`Error reconciling collection "${name}": ${err.message}`);
+    log(`❌ Error reconciling collection "${name}": ${err.message}`);
+    if (err.stack) {
+      log(`   Stack: ${err.stack}`);
+    }
     errorsTotal.inc({ type: 'reconcile' });
     throw err;
   }

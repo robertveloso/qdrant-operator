@@ -8,32 +8,37 @@ const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const clusterName = apiObj.spec.cluster;
   var parameters = {};
   // read the cluster custom object
-  const resCluster = await k8sCustomApi.getNamespacedCustomObjectStatus({
-    group: 'qdrant.operator',
-    version: 'v1alpha1',
-    namespace: namespace,
-    plural: 'qdrantclusters',
-    name: clusterName
-  });
-  const resCurrent = resCluster;
-  // set http or https connection scheme
-  if (typeof resCurrent.spec.tls == 'undefined') {
-    parameters.url = 'http://';
-  } else {
-    parameters.url = resCurrent.spec.tls.enabled ? 'https://' : 'http://';
-  }
-  parameters.url += `${clusterName}.${namespace}:6333/collections/${name}`;
-  parameters.headers = { 'Content-Type': 'application/json' };
-  // set apikey header if required
-  if (resCurrent.spec.apikey !== 'false') {
-    const resSecret = await k8sCoreApi.readNamespacedSecret({
-      name: `${clusterName}-apikey`,
-      namespace: namespace
+  try {
+    const resCluster = await k8sCustomApi.getNamespacedCustomObjectStatus({
+      group: 'qdrant.operator',
+      version: 'v1alpha1',
+      namespace: namespace,
+      plural: 'qdrantclusters',
+      name: clusterName
     });
-    const resApikey = atob(resSecret.data['api-key']);
-    parameters.headers['api-key'] = resApikey;
+    const resCurrent = resCluster;
+    // set http or https connection scheme
+    if (typeof resCurrent.spec.tls == 'undefined') {
+      parameters.url = 'http://';
+    } else {
+      parameters.url = resCurrent.spec.tls.enabled ? 'https://' : 'http://';
+    }
+    parameters.url += `${clusterName}.${namespace}:6333/collections/${name}`;
+    parameters.headers = { 'Content-Type': 'application/json' };
+    // set apikey header if required
+    if (resCurrent.spec.apikey !== 'false') {
+      const resSecret = await k8sCoreApi.readNamespacedSecret({
+        name: `${clusterName}-apikey`,
+        namespace: namespace
+      });
+      const resApikey = atob(resSecret.data['api-key']);
+      parameters.headers['api-key'] = resApikey;
+    }
+    return parameters;
+  } catch (err) {
+    log(`Error getting connection parameters for collection "${name}" in cluster "${clusterName}": ${err.message}`);
+    throw err;
   }
-  return parameters;
 };
 
 // prepare connection params
@@ -164,29 +169,30 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
 
 export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
-  const parameters = await getConnectionParameters(
-    apiObj,
-    k8sCustomApi,
-    k8sCoreApi
-  );
-  // prepare payload
-  var body = {
-    vectors: {
-      size: apiObj.spec.vectorSize,
-      distance: 'Cosine',
-      on_disk: apiObj.spec.onDisk
-    },
-    shard_number: apiObj.spec.shardNumber,
-    replication_factor: apiObj.spec.replicationFactor
-  };
-  // set additional configs if defined
-  if (typeof apiObj.spec.config !== 'undefined') {
-    body = { ...body, ...apiObj.spec.config };
-  }
   try {
+    const parameters = await getConnectionParameters(
+      apiObj,
+      k8sCustomApi,
+      k8sCoreApi
+    );
+    // prepare payload
+    var body = {
+      vectors: {
+        size: apiObj.spec.vectorSize,
+        distance: 'Cosine',
+        on_disk: apiObj.spec.onDisk
+      },
+      shard_number: apiObj.spec.shardNumber,
+      replication_factor: apiObj.spec.replicationFactor
+    };
+    // set additional configs if defined
+    if (typeof apiObj.spec.config !== 'undefined') {
+      body = { ...body, ...apiObj.spec.config };
+    }
     log(
       `Trying to create a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`
     );
+    log(`   URL: ${parameters.url}`);
     // PUT request to Qdrant API
     const resp = await fetch(parameters.url, {
       method: 'PUT',
@@ -195,8 +201,15 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     });
     const data = await resp.json();
     log(`Status: "${JSON.stringify(data.status)}", time: "${data.time}".`);
+    if (data.status && data.status.error) {
+      log(`⚠️ Collection creation returned error: ${JSON.stringify(data.status.error)}`);
+    }
   } catch (err) {
-    log(err);
+    log(`❌ Error creating collection "${name}": ${err.message}`);
+    if (err.stack) {
+      log(`   Stack: ${err.stack}`);
+    }
+    throw err;
   }
 };
 

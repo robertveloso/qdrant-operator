@@ -244,25 +244,33 @@ export const onDoneCollection = (err) => {
       setTimeout(async () => {
         // List all collections to catch any that were created while watch was down
         try {
+          log('Listing collections after rate limit reconnect...');
           const collectionList = await k8sCustomApi.listNamespacedCustomObject({
             group: 'qdrant.operator',
             version: 'v1alpha1',
             namespace: '',
             plural: 'qdrantcollections'
           });
+          log(`Found ${collectionList.items.length} collection(s) after reconnect, processing...`);
           for (const collection of collectionList.items) {
             const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+            log(`Processing collection "${collection.metadata.name}" from reconnect list...`);
             // Skip if deletion is in progress
             if (collection.metadata.deletionTimestamp) {
+              log(`Skipping collection "${collection.metadata.name}" - deletion in progress`);
               continue;
             }
             // Update cache
             collectionCache.set(resourceKey, collection);
             // Reconcile to ensure it exists in Qdrant
             scheduleReconcile(collection, 'collection');
+            log(`Scheduled reconciliation for collection "${collection.metadata.name}"`);
           }
         } catch (listErr) {
           log(`Error listing collections after reconnect: ${listErr.message}`);
+          if (listErr.stack) {
+            log(`   Stack: ${listErr.stack}`);
+          }
         }
         watchResource();
       }, delay);
@@ -454,7 +462,9 @@ export const watchResource = async () => {
             namespace: '',
             plural: 'qdrantclusters'
           });
-          log(`Found ${clusterList.items.length} existing cluster(s), processing...`);
+          log(
+            `Found ${clusterList.items.length} existing cluster(s), processing...`
+          );
           for (const cluster of clusterList.items) {
             const resourceKey = `${cluster.metadata.namespace}/${cluster.metadata.name}`;
             // Skip if deletion is in progress
@@ -480,17 +490,22 @@ export const watchResource = async () => {
             namespace: '',
             plural: 'qdrantcollections'
           });
-          log(`Found ${collectionList.items.length} existing collection(s), processing...`);
+          log(
+            `Found ${collectionList.items.length} existing collection(s), processing...`
+          );
           for (const collection of collectionList.items) {
             const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
+            log(`Processing collection "${collection.metadata.name}" from initial list...`);
             // Skip if deletion is in progress
             if (collection.metadata.deletionTimestamp) {
+              log(`Skipping collection "${collection.metadata.name}" - deletion in progress`);
               continue;
             }
             // Update cache
             collectionCache.set(resourceKey, collection);
             // Reconcile to ensure it exists in Qdrant
             scheduleReconcile(collection, 'collection');
+            log(`Scheduled reconciliation for collection "${collection.metadata.name}"`);
           }
         } catch (listErr) {
           log(`Error listing collections on initial watch: ${listErr.message}`);
