@@ -189,6 +189,57 @@ Valida que cleanup é idempotente quando recursos já foram parcialmente removid
 
 Em produção, recursos podem ser deletados manualmente ou por outros processos. O operator deve lidar com isso graciosamente.
 
+### `110-pvc-auto-resize.sh` - PVC Auto Resize
+
+Valida que PVCs são expandidos automaticamente quando `spec.persistence.size` aumenta.
+
+**O que testa:**
+
+- PVC é criado com tamanho inicial correto
+- Quando spec.persistence.size aumenta, PVC é expandido automaticamente
+- Operator detecta mudança e aplica expansão
+- PVC entra em estado de Resizing (se suportado pelo storage provider)
+
+**Por que é importante:**
+
+Garante que usuários podem aumentar storage sem intervenção manual. Valida que resize automático funciona corretamente.
+
+**Nota**: Requer storage provider que suporte volume expansion.
+
+### `120-volumesnapshot-manual.sh` - VolumeSnapshot Manual
+
+Valida criação manual de VolumeSnapshots via `createNow: true`.
+
+**O que testa:**
+
+- VolumeSnapshot é criado quando `createNow: true`
+- Snapshots são criados para todos os PVCs do cluster
+- Snapshots têm labels corretos (clustername, component)
+- Snapshot fica pronto (readyToUse) quando suportado
+
+**Por que é importante:**
+
+Valida backup nativo de PVCs via CSI snapshots. Garante que snapshots podem ser criados sob demanda.
+
+**Nota**: Teste é pulado automaticamente se VolumeSnapshot API não estiver disponível (CSI snapshot feature não instalado).
+
+### `130-volumesnapshot-scheduled.sh` - VolumeSnapshot Scheduled
+
+Valida criação agendada de VolumeSnapshots via CronJob.
+
+**O que testa:**
+
+- CronJob é criado quando `schedule` é configurado
+- CronJob executa e cria snapshots
+- Retention policy funciona (mantém apenas N snapshots)
+- Snapshots antigos são deletados automaticamente
+
+**Por que é importante:**
+
+Garante backups automáticos e regulares. Valida que retention policy previne acúmulo de snapshots.
+
+**Nota**: Teste é pulado automaticamente se VolumeSnapshot API não estiver disponível (CSI snapshot feature não instalado).
+
 ## 🚀 Como Executar
 
 ### Localmente
@@ -213,6 +264,9 @@ chmod +x *.sh
 ./80-periodic-reconcile-no-events.sh
 ./90-spec-update-rollout.sh
 ./100-delete-partial-cleanup.sh
+./110-pvc-auto-resize.sh
+./120-volumesnapshot-manual.sh
+./130-volumesnapshot-scheduled.sh
 ```
 
 ### No CI/CD
@@ -236,7 +290,10 @@ tests/e2e/
 ├── 70-invalid-spec.sh               # Spec inválida
 ├── 80-periodic-reconcile-no-events.sh  # Reconciliação periódica sem eventos
 ├── 90-spec-update-rollout.sh        # Update de spec com rollout
-└── 100-delete-partial-cleanup.sh    # Delete com cleanup parcial
+├── 100-delete-partial-cleanup.sh    # Delete com cleanup parcial
+├── 110-pvc-auto-resize.sh          # Resize automático de PVCs
+├── 120-volumesnapshot-manual.sh     # VolumeSnapshot manual
+└── 130-volumesnapshot-scheduled.sh  # VolumeSnapshot agendado
 ```
 
 ## 🔧 Utilitários (`utils.sh`)

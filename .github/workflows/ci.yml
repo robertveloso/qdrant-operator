@@ -201,5 +201,14 @@ jobs:
           # Delete partial cleanup: Verify idempotent cleanup
           tests/e2e/100-delete-partial-cleanup.sh
 
+          # PVC auto resize: Verify automatic PVC expansion
+          tests/e2e/110-pvc-auto-resize.sh
+
+          # VolumeSnapshot manual: Verify manual snapshot creation
+          tests/e2e/120-volumesnapshot-manual.sh
+
+          # VolumeSnapshot scheduled: Verify scheduled snapshots via CronJob
+          tests/e2e/130-volumesnapshot-scheduled.sh
+
           echo ""
           echo "✅ All E2E tests passed!"
