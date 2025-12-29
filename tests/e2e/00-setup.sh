@@ -22,7 +22,28 @@ kubectl rollout status statefulset my-cluster -n default --timeout=120s || {
 }
 
 log_info "Cleaning up any existing collection (if present)..."
-kubectl delete qdrantcollections my-collection -n default --ignore-not-found=true 2>/dev/null || true
+# First, delete the CRD (this will trigger finalizer cleanup)
+kubectl delete qdrantcollections my-collection -n default --ignore-not-found=true --wait=false 2>/dev/null || true
+
+# Also clean up the collection directly in Qdrant if it exists
+# This is necessary because the operator may fail to create if collection already exists
+log_info "Cleaning up collection in Qdrant (if present)..."
+QDRANT_POD=$(kubectl get pod -n default -l clustername=my-cluster -o name 2>/dev/null | head -n1 | sed 's|pod/||' || echo "")
+if [ -n "${QDRANT_POD}" ]; then
+  # Wait for pod to be ready
+  log_info "Waiting for Qdrant pod to be ready..."
+  kubectl wait --for=condition=ready pod "${QDRANT_POD}" -n default --timeout=30s 2>/dev/null || true
+
+  # Try to delete collection directly in Qdrant
+  log_info "Attempting to delete collection in Qdrant..."
+  DELETE_RESPONSE=$(kubectl exec -n default "${QDRANT_POD}" -- \
+    timeout 10 curl -s -X DELETE "http://localhost:6333/collections/my-collection" 2>/dev/null || echo "")
+  if [ -n "${DELETE_RESPONSE}" ]; then
+    log_info "Delete response: ${DELETE_RESPONSE}"
+  fi
+  sleep 2
+fi
+
 # Wait a bit for cleanup to complete
 sleep 3
 
