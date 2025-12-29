@@ -196,6 +196,73 @@ Valida que a reconciliação periódica funciona mesmo quando eventos de watch s
 
 Garante que o safety net funciona. Em produção, watches podem ser perdidos temporariamente (API server restart, network issues).
 
+### `85-metrics.sh` - Validação de Métricas
+
+Valida que o operator expõe métricas corretamente via endpoint `/metrics` e que os counters aumentam conforme esperado.
+
+**O que testa:**
+
+- Endpoint `/metrics` está acessível
+- Métricas principais existem (`qdrant_operator_reconcile_total`, `qdrant_operator_errors_total`)
+- `reconcile_total` aumenta quando reconciliações ocorrem
+- `errors_total` não explode (não aumenta excessivamente)
+- Outras métricas importantes existem (opcional)
+
+**Cenário:**
+
+1. Estabelece port-forward para endpoint de métricas
+2. Verifica que `/metrics` está acessível
+3. Registra valores iniciais de `reconcile_total` e `errors_total`
+4. Cria e atualiza recursos para triggerar reconciliações
+5. Verifica que `reconcile_total` aumentou
+6. Verifica que `errors_total` não aumentou excessivamente (threshold: 10 erros)
+
+**Por que é importante:**
+
+Garante que o operator está expondo métricas corretamente para observabilidade. Métricas são essenciais para monitoramento em produção. Valida que:
+
+- O sistema de métricas funciona
+- Reconciliações são contabilizadas
+- Erros não estão explodindo silenciosamente
+
+**Nota**: Este teste eleva o nível de qualidade, validando observabilidade além da funcionalidade básica.
+
+### `88-upgrade-compatibility.sh` - Compatibilidade de Upgrade (N-1)
+
+Valida que o upgrade do operator não quebra recursos existentes. Testa o cenário comum onde usuários atualizam o operator sem recriar clusters/collections.
+
+**O que testa:**
+
+- Deploy do operator em versão anterior (ex: `latest` ou tag fixa)
+- Criação de cluster e collection com versão anterior
+- Upgrade do operator para versão atual (HEAD)
+- Nada é recriado (StatefulSet UID permanece igual)
+- Status converge corretamente após upgrade
+- Sem erros críticos nos logs do operator
+- Recursos continuam funcionais após upgrade
+
+**Cenário:**
+
+1. Deploy do operator em versão anterior
+2. Cria cluster e collection
+3. Registra UIDs e gerações dos recursos
+4. Atualiza operator para versão atual
+5. Verifica que recursos não foram recriados
+6. Verifica que status converge
+7. Verifica que não há erros nos logs
+
+**Por que é importante:**
+
+Isso quebra operators na vida real com frequência. Helm charts raramente testam isso, mas clientes fazem upgrade direto. Este teste valida compatibilidade N-1 (versão anterior → versão atual) sem necessidade de recriar recursos.
+
+**Configuração:**
+
+- `PREVIOUS_OPERATOR_VERSION`: Versão anterior do operator (padrão: `latest`)
+- `CURRENT_OPERATOR_VERSION`: Versão atual do operator (padrão: `$GITHUB_SHA` ou `latest`)
+- `GITHUB_REPOSITORY`: Repositório do operator (inferido automaticamente se não definido)
+
+**Nota**: Pouco código, valor enorme. Não precisa de matrix gigante - testar 1 versão anterior já resolve a maioria dos problemas de compatibilidade.
+
 ### `90-spec-update-rollout.sh` - Update de Spec com Rollout Controlado
 
 Valida que updates de spec geram rollouts controlados e status correto.
@@ -212,6 +279,34 @@ Valida que updates de spec geram rollouts controlados e status correto.
 **Por que é importante:**
 
 Garante que updates são seguros e controlados. Valida que hash comparison funciona e que status reflete estado real.
+
+### `95-rollback.sh` - Rollback/Downgrade
+
+Valida que o operator lida corretamente com rollback de spec (reverter para configuração anterior).
+
+**O que testa:**
+
+- Cria cluster com spec inicial (ex: image v1.16.3, replicas: 1)
+- Atualiza spec (ex: image v1.17.0, replicas: 2) e aguarda rollout
+- Reverte para spec original (downgrade)
+- Verifica que rollback converge corretamente
+- Verifica que StatefulSet e CR spec correspondem após rollback
+- Verifica que não há rollouts infinitos após convergência
+- Verifica que cluster fica saudável após rollback
+- Verifica que contagem de pods corresponde à spec inicial
+
+**Cenário:**
+
+1. Cria cluster com spec inicial
+2. Atualiza spec (upgrade) - muda image e replicas
+3. Aguarda rollout completar
+4. Reverte para spec original (downgrade)
+5. Aguarda rollback rollout completar
+6. Verifica convergência completa
+
+**Por que é importante:**
+
+Especialmente útil quando versionar CRDs ou fazer rollback de deployments. Garante que o operator pode reverter mudanças de forma segura e que o estado converge corretamente após rollback. Valida que o mecanismo de hash e reconciliação funciona corretamente em ambas as direções (upgrade e downgrade).
 
 ### `100-delete-partial-cleanup.sh` - Delete com Cleanup Parcial
 
@@ -397,7 +492,10 @@ chmod +x *.sh
 ./65-operator-crash-loop.sh
 ./70-invalid-spec.sh
 ./80-periodic-reconcile-no-events.sh
+./85-metrics.sh
+./88-upgrade-compatibility.sh
 ./90-spec-update-rollout.sh
+./95-rollback.sh
 ./100-delete-partial-cleanup.sh
 ./110-pvc-auto-resize.sh
 ./120-volumesnapshot-manual.sh
@@ -430,7 +528,10 @@ tests/e2e/
 ├── 65-operator-crash-loop.sh        # Operator crash-loop durante reconcile (múltiplos crashes)
 ├── 70-invalid-spec.sh               # Spec inválida
 ├── 80-periodic-reconcile-no-events.sh  # Reconciliação periódica sem eventos
+├── 85-metrics.sh                      # Validação de métricas
+├── 88-upgrade-compatibility.sh         # Compatibilidade de upgrade (N-1)
 ├── 90-spec-update-rollout.sh        # Update de spec com rollout
+├── 95-rollback.sh                   # Rollback/downgrade de spec
 ├── 100-delete-partial-cleanup.sh    # Delete com cleanup parcial
 ├── 110-pvc-auto-resize.sh          # Resize automático de PVCs
 ├── 120-volumesnapshot-manual.sh     # VolumeSnapshot manual

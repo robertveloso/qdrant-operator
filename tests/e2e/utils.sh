@@ -41,12 +41,25 @@ wait_for_resource() {
       log_info "${resource_type}/${resource_name} exists!"
       return 0
     fi
+    # Check if resource type exists (CRD might not be installed)
+    if ! kubectl api-resources --namespaced=true 2>/dev/null | grep -q "^${resource_type}"; then
+      if [ $elapsed -eq 0 ]; then
+        log_warn "⚠️ Resource type '${resource_type}' not found in API. Checking CRDs..."
+        kubectl get crd | grep -i "${resource_type}" || true
+      fi
+    fi
     echo "   Waiting... (${elapsed}s/${timeout}s)"
     sleep 5
     elapsed=$((elapsed + 5))
   done
 
   log_error "${resource_type}/${resource_name} not found within timeout"
+  # Add diagnostics
+  log_info "Diagnostics:"
+  log_info "  Checking if resource type exists:"
+  kubectl api-resources | grep -i "${resource_type}" || log_warn "  Resource type '${resource_type}' not found in API"
+  log_info "  Checking all resources of this type in namespace:"
+  kubectl get "${resource_type}" -n "${namespace}" 2>/dev/null || log_warn "  Cannot list ${resource_type} in namespace ${namespace}"
   return 1
 }
 

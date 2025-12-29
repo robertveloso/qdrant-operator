@@ -25,7 +25,22 @@ log_info "Creating Qdrant collection..."
 kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-collection-minimal.yaml"
 
 log_info "Waiting for collection to be created..."
-wait_for_resource "qdrantcollection" "my-collection" "default" 30
+# Increase timeout to 60s and add diagnostics
+# Note: CRD uses plural 'qdrantcollections' but kubectl accepts both
+wait_for_resource "qdrantcollections" "my-collection" "default" 60 || {
+  log_error "Collection not found. Checking operator status..."
+  OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${OPERATOR_POD}" ]; then
+    log_info "Operator pod: ${OPERATOR_POD}"
+    log_info "Recent operator logs:"
+    kubectl logs -n qdrant-operator "${OPERATOR_POD}" --tail=50 2>/dev/null || true
+  fi
+  log_info "Checking if collection CRD exists:"
+  kubectl get qdrantcollections -n default 2>/dev/null || true
+  log_info "Checking collection events:"
+  kubectl get events -n default --field-selector involvedObject.name=my-collection --sort-by='.lastTimestamp' 2>/dev/null | tail -10 || true
+  exit 1
+}
 
 log_info "Waiting for collection to be ready in Qdrant..."
 wait_for_collection_green "my-cluster" "my-collection" "default" 60

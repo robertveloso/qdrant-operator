@@ -157,7 +157,11 @@ jobs:
           tests/e2e/30-idempotency.sh
           tests/e2e/70-invalid-spec.sh
           tests/e2e/80-periodic-reconcile-no-events.sh
+          tests/e2e/85-metrics.sh
+          # Upgrade compatibility test: use 'latest' as previous version, current SHA as current
+          PREVIOUS_OPERATOR_VERSION=latest CURRENT_OPERATOR_VERSION=${{ github.sha }} tests/e2e/88-upgrade-compatibility.sh
           tests/e2e/90-spec-update-rollout.sh
+          tests/e2e/95-rollback.sh
           echo "✅ Core E2E tests passed!"
 
   # High Availability tests
