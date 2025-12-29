@@ -12,6 +12,7 @@ RUN npm ci --omit=dev
 COPY --chown=node:node *.js ./
 COPY --chown=node:node templates templates/
 COPY --chown=node:node tools tools/
+COPY --chown=node:node api api/
 
 
 CMD [ "node", "index.js" ]
