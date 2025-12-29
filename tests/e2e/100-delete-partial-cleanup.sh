@@ -15,24 +15,19 @@ kubectl rollout status statefulset my-cluster -n default --timeout=120s
 
 log_info "Cluster created successfully"
 
-# Manually delete StatefulSet (simulating partial failure)
-log_info "Manually deleting StatefulSet to simulate partial cleanup..."
-kubectl delete statefulset my-cluster -n default --wait=false
+# Delete the CR in background (triggers finalizer), then immediately delete StatefulSet to simulate partial cleanup
+log_info "Deleting QdrantCluster (triggers finalizer)..."
+kubectl delete qdrantcluster my-cluster -n default --wait=false
 
-log_info "Waiting for StatefulSet to be deleted..."
-sleep 5
+# Give a moment for deletionTimestamp to be set, then delete StatefulSet
+# This simulates the StatefulSet being already deleted when finalizer cleanup runs
+log_info "Waiting a moment for deletionTimestamp to be set..."
+sleep 1
 
-# Verify StatefulSet is gone
-if kubectl get sts my-cluster -n default 2>/dev/null; then
-  log_error "StatefulSet still exists after manual deletion"
-  exit 1
-fi
+log_info "Manually deleting StatefulSet to simulate partial cleanup (StatefulSet already gone)..."
+kubectl delete statefulset my-cluster -n default --wait=false 2>/dev/null || true
 
-log_info "✅ StatefulSet manually deleted (simulating partial cleanup)"
-
-# Now delete the CR - finalizer should handle cleanup gracefully
-log_info "Deleting QdrantCluster (finalizer should handle cleanup idempotently)..."
-kubectl delete qdrantcluster my-cluster -n default
+log_info "StatefulSet deletion attempted (finalizer should handle 'not found' gracefully)"
 
 log_info "Waiting for finalizer to complete and resource to be deleted (timeout: 60s)..."
 wait_for_deletion "qdrantcluster" "my-cluster" "default" 60

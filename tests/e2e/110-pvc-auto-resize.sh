@@ -13,6 +13,7 @@ EXPANDED_SIZE="2Gi"
 CLUSTER_NAME="resize-test-cluster"
 
 log_info "Creating cluster with initial PVC size: ${INITIAL_SIZE}..."
+# Don't specify storageClassName - let it use the default (operator will use 'default' if not specified)
 cat <<EOF | kubectl apply -f -
 apiVersion: qdrant.operator/v1alpha1
 kind: QdrantCluster
@@ -24,11 +25,21 @@ spec:
   image: qdrant/qdrant:v1.16.3
   persistence:
     size: ${INITIAL_SIZE}
-    storageClassName: standard
 EOF
 
 wait_for_resource "statefulset" "${CLUSTER_NAME}" "default" 60
-kubectl rollout status statefulset ${CLUSTER_NAME} -n default --timeout=120s
+
+log_info "Waiting for StatefulSet rollout (timeout: 120s)..."
+if ! kubectl rollout status statefulset ${CLUSTER_NAME} -n default --timeout=120s; then
+  log_error "StatefulSet rollout failed or timed out"
+  log_info "Checking pod status..."
+  kubectl get pods -n default -l clustername=${CLUSTER_NAME} -o wide
+  log_info "Checking PVC status..."
+  kubectl get pvc -n default | grep ${CLUSTER_NAME} || echo "No PVCs found"
+  log_info "Checking StatefulSet events..."
+  kubectl describe statefulset ${CLUSTER_NAME} -n default | tail -20
+  exit 1
+fi
 
 log_info "Waiting for cluster to be Healthy..."
 timeout=60

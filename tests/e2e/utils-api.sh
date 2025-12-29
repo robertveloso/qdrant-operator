@@ -11,10 +11,45 @@ get_api_token() {
   echo ""  # Empty token (development mode)
 }
 
-# Get API base URL
+# Get API base URL - use localhost with port-forward or service URL
 get_api_url() {
   local namespace=${1:-default}
-  echo "http://qdrant-operator.qdrant-operator:8081/api/v1"
+  # Try localhost first (for port-forward), fallback to service URL
+  if curl -s -f -m 2 "http://localhost:8081/health" >/dev/null 2>&1; then
+    echo "http://localhost:8081/api/v1"
+  else
+    echo "http://qdrant-operator.qdrant-operator:8081/api/v1"
+  fi
+}
+
+# Start port-forward in background if not already running
+start_port_forward() {
+  local pod=$1
+  local port=${2:-8081}
+
+  # Check if port-forward is already running
+  if curl -s -f -m 2 "http://localhost:${port}/health" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Start port-forward in background
+  log_info "Starting port-forward to operator pod ${pod} on port ${port}..."
+  kubectl port-forward -n qdrant-operator "pod/${pod}" "${port}:${port}" >/dev/null 2>&1 &
+  local pf_pid=$!
+
+  # Wait for port-forward to be ready
+  local timeout=10
+  local elapsed=0
+  while [ $elapsed -lt $timeout ]; do
+    if curl -s -f -m 2 "http://localhost:${port}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  log_warn "⚠️ Port-forward may not be ready, continuing anyway..."
+  return 0
 }
 
 # Make API request
@@ -24,6 +59,12 @@ api_request() {
   local namespace=${3:-default}
   local token=${4:-}
   local data=${5:-}
+  local pod=${6:-}
+
+  # Start port-forward if pod is provided
+  if [ -n "${pod}" ]; then
+    start_port_forward "${pod}" 8081
+  fi
 
   local url=$(get_api_url "${namespace}")${endpoint}?namespace=${namespace}
   local headers=()

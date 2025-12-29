@@ -38,7 +38,7 @@ CREATE_RESPONSE=$(api_request "POST" "/collections" "${NAMESPACE}" "${API_TOKEN}
     \"distance\": \"Cosine\"
   },
   \"replication\": 1
-}")
+}" "${POD}")
 
 HTTP_CODE=$(echo "${CREATE_RESPONSE}" | tail -n1)
 BODY=$(echo "${CREATE_RESPONSE}" | head -n-1)
@@ -75,7 +75,7 @@ fi
 # Test 2: List collections via API
 log_test "Test 2: List collections via API"
 
-LIST_RESPONSE=$(api_request "GET" "/collections" "${NAMESPACE}" "${API_TOKEN}")
+LIST_RESPONSE=$(api_request "GET" "/collections" "${NAMESPACE}" "${API_TOKEN}" "" "${POD}")
 HTTP_CODE=$(echo "${LIST_RESPONSE}" | tail -n1)
 BODY=$(echo "${LIST_RESPONSE}" | head -n-1)
 
@@ -97,7 +97,7 @@ fi
 # Test 3: Get specific collection via API
 log_test "Test 3: Get specific collection via API"
 
-GET_RESPONSE=$(api_request "GET" "/collections/${COLLECTION_NAME}" "${NAMESPACE}" "${API_TOKEN}")
+GET_RESPONSE=$(api_request "GET" "/collections/${COLLECTION_NAME}" "${NAMESPACE}" "${API_TOKEN}" "" "${POD}")
 HTTP_CODE=$(echo "${GET_RESPONSE}" | tail -n1)
 BODY=$(echo "${GET_RESPONSE}" | head -n-1)
 
@@ -129,7 +129,7 @@ TEMPLATE_RESPONSE=$(api_request "POST" "/templates" "${NAMESPACE}" "${API_TOKEN}
     \"size\": 10,
     \"distance\": \"Cosine\"
   }
-}")
+}" "${POD}")
 
 TEMPLATE_HTTP_CODE=$(echo "${TEMPLATE_RESPONSE}" | tail -n1)
 
@@ -142,7 +142,7 @@ if [ "${TEMPLATE_HTTP_CODE}" = "201" ]; then
     \"name\": \"${COLLECTION_WITH_TEMPLATE}\",
     \"cluster\": \"${CLUSTER_NAME}\",
     \"template\": \"${TEMPLATE_NAME}\"
-  }")
+  }" "${POD}")
 
   TEMPLATE_CREATE_CODE=$(echo "${CREATE_TEMPLATE_RESPONSE}" | tail -n1)
 
@@ -165,7 +165,7 @@ VALIDATION_RESPONSE=$(api_request "POST" "/collections" "${NAMESPACE}" "${API_TO
   \"vectors\": {
     \"size\": 10
   }
-}")
+}" "${POD}")
 
 VALIDATION_CODE=$(echo "${VALIDATION_RESPONSE}" | tail -n1)
 
