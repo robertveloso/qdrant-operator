@@ -122,18 +122,57 @@ wait_for_collection_green() {
   local pod=$(kubectl get pod -n "${namespace}" -l clustername="${cluster_name}" -o name | head -n1 | sed 's|pod/||')
   if [ -z "${pod}" ]; then
     log_error "No pod found for cluster ${cluster_name}"
+    kubectl get pods -n "${namespace}" -l clustername="${cluster_name}"
     return 1
   fi
 
-  local elapsed=0
-  while [ $elapsed -lt $timeout ]; do
-    local status=$(kubectl exec -n "${namespace}" "${pod}" -- \
-      curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null | \
-      grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+  log_info "Using Qdrant pod: ${pod}"
 
-    if [ "${status}" = "green" ]; then
-      log_info "✅ Collection is green"
-      return 0
+  # Wait for pod to be ready
+  local pod_ready=false
+  local wait_elapsed=0
+  while [ $wait_elapsed -lt 30 ]; do
+    local pod_status=$(kubectl get pod "${pod}" -n "${namespace}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    if [ "${pod_status}" = "Running" ]; then
+      local ready=$(kubectl get pod "${pod}" -n "${namespace}" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+      if [ "${ready}" = "true" ]; then
+        pod_ready=true
+        break
+      fi
+    fi
+    sleep 2
+    wait_elapsed=$((wait_elapsed + 2))
+  done
+
+  if [ "${pod_ready}" = "false" ]; then
+    log_warn "⚠️ Pod ${pod} may not be ready yet, but continuing..."
+  fi
+
+  local elapsed=0
+  local last_status=""
+  while [ $elapsed -lt $timeout ]; do
+    # Try to get collection status from Qdrant API
+    local response=$(kubectl exec -n "${namespace}" "${pod}" -- \
+      curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || echo "")
+
+    if [ -n "${response}" ]; then
+      local status=$(echo "${response}" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+      last_status="${status}"
+
+      if [ "${status}" = "green" ]; then
+        log_info "✅ Collection is green"
+        return 0
+      fi
+
+      # Log status every 10 seconds
+      if [ $((elapsed % 10)) -eq 0 ] && [ -n "${status}" ]; then
+        log_info "Collection status: ${status} (${elapsed}s/${timeout}s)"
+      fi
+    else
+      # If curl fails, log it but continue
+      if [ $((elapsed % 10)) -eq 0 ]; then
+        log_warn "⚠️ Could not query collection status (pod may still be starting)"
+      fi
     fi
 
     sleep 2
@@ -141,6 +180,20 @@ wait_for_collection_green() {
   done
 
   log_error "Collection ${collection_name} did not become green within timeout"
+  log_info "Diagnostics:"
+  log_info "  Last status: ${last_status:-unknown}"
+  log_info "  Collection CRD:"
+  kubectl get qdrantcollections "${collection_name}" -n "${namespace}" -o yaml 2>/dev/null | head -30 || true
+  log_info "  Qdrant pod status:"
+  kubectl get pod "${pod}" -n "${namespace}" -o yaml 2>/dev/null | grep -A 10 "status:" || true
+  log_info "  Attempting to get collection info from Qdrant:"
+  kubectl exec -n "${namespace}" "${pod}" -- \
+    curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || log_warn "  Failed to query Qdrant API"
+  log_info "  Operator logs (last 30 lines):"
+  OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${OPERATOR_POD}" ]; then
+    kubectl logs -n qdrant-operator "${OPERATOR_POD}" --tail=30 2>/dev/null | grep -i "collection\|${collection_name}" || true
+  fi
   return 1
 }
 

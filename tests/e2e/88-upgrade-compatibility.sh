@@ -117,7 +117,7 @@ spec:
 EOF
 
 wait_for_resource "qdrantcollection" "${COLLECTION_NAME}" "${NAMESPACE}" 60
-wait_for_collection_green "${COLLECTION_NAME}" "${CLUSTER_NAME}" "${NAMESPACE}" 60
+wait_for_collection_green "${CLUSTER_NAME}" "${COLLECTION_NAME}" "${NAMESPACE}" 60
 
 log_info "✅ Collection created and green"
 
@@ -190,7 +190,7 @@ log_info "Step 5: Verifying status converges after upgrade..."
 wait_for_cluster_healthy "${CLUSTER_NAME}" "${NAMESPACE}" 120
 
 # Verify collection is still green
-wait_for_collection_green "${COLLECTION_NAME}" "${CLUSTER_NAME}" "${NAMESPACE}" 60
+wait_for_collection_green "${CLUSTER_NAME}" "${COLLECTION_NAME}" "${NAMESPACE}" 60
 
 log_info "✅ Status converged: cluster healthy, collection green"
 
