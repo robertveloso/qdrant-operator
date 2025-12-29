@@ -56,7 +56,7 @@ log_info "✅ Collection created: ${COLLECTION_NAME}"
 
 # Wait for collection to be ready
 wait_for_resource "qdrantcollection" "${COLLECTION_NAME}" "${NAMESPACE}" 30
-sleep 10
+wait_for_collection_green "${CLUSTER_NAME}" "${COLLECTION_NAME}" "${NAMESPACE}" 60
 
 # Insert dummy data into collection
 log_test "Inserting dummy data into collection..."

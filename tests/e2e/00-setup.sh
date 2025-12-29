@@ -25,7 +25,10 @@ log_info "Creating Qdrant collection..."
 kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-collection-minimal.yaml"
 
 log_info "Waiting for collection to be created..."
-sleep 10
+wait_for_resource "qdrantcollection" "my-collection" "default" 30
+
+log_info "Waiting for collection to be ready in Qdrant..."
+wait_for_collection_green "my-cluster" "my-collection" "default" 60
 
 log_info "✅ Setup complete: cluster and collection created"
 

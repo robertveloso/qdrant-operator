@@ -108,6 +108,52 @@ Valida comportamento de alta disponibilidade quando o leader é deletado durante
 
 Este é o cenário mais perigoso de failover - quando o leader morre no meio de uma operação. Garante que `activeReconciles` funciona e que não há corrupção de estado.
 
+### `65-operator-crash-loop.sh` - Operator Crash Loop Durante Reconcile
+
+Valida que o operator lida graciosamente com crashes repetidos durante reconciliação ativa.
+
+**O que testa:**
+
+- Operator não cria recursos duplicados após crashes repetidos
+- Estado converge corretamente mesmo após múltiplos crashes
+- Não há split-brain ou estado inconsistente
+- Operator continua funcionando após crash-loop
+- Nenhum recurso órfão é criado
+
+**Cenário:**
+
+1. Cria cluster e aguarda estar healthy
+2. Inicia reconciliação longa (atualiza image para forçar rollout)
+3. Deleta pod do operator **4 vezes seguidas** durante reconcile
+4. Verifica que:
+   - Apenas 1 StatefulSet existe (sem duplicatas)
+   - Apenas 1 pod do cluster existe (sem órfãos)
+   - Estado converge para estado correto
+   - Não há erros de split-brain nos logs
+   - Operator ainda pode reconciliar após crashes
+
+**Por que é importante:**
+
+Este teste separa operators **bons** de **ótimos**. Em produção, operators podem entrar em crash-loop devido a:
+
+- Bugs no código
+- Problemas de memória (OOMKilled)
+- Problemas de rede temporários
+- Problemas com dependências externas
+
+Um operator robusto deve:
+
+- ✅ Não criar recursos duplicados mesmo após múltiplos crashes
+- ✅ Convergir para estado correto eventualmente
+- ✅ Não entrar em split-brain
+- ✅ Continuar funcionando após crash-loop
+
+**Diferenciação:**
+
+- `50-leader-failover.sh`: Testa 1 crash simples
+- `60-leader-failover-during-reconcile.sh`: Testa 1 crash durante reconcile
+- `65-operator-crash-loop.sh`: Testa **múltiplos crashes consecutivos** durante reconcile (mais rigoroso)
+
 ### `70-invalid-spec.sh` - Spec Inválida
 
 Valida que o operator lida graciosamente com specs inválidas sem crashar.
@@ -251,10 +297,15 @@ Valida criação e listagem de collections via API REST.
 - Obter collection específica (`GET /api/v1/collections/{name}`)
 - Criar collection usando template
 - Validação de requests (campos obrigatórios)
+- **Concorrência**: Duas requisições simultâneas criando a mesma collection
+  - Uma deve retornar 201 (sucesso)
+  - Outra deve retornar 409 (Conflict)
+  - Apenas um CRD deve ser criado (sem duplicatas)
+  - Valida idempotência, locking lógico e consistência
 
 **Por que é importante:**
 
-Garante que a API REST funciona corretamente e cria CRDs que são reconciliados pelo operator.
+Garante que a API REST funciona corretamente e cria CRDs que são reconciliados pelo operator. O teste de concorrência valida que a API lida corretamente com requisições simultâneas, prevenindo criação de recursos duplicados e garantindo consistência mesmo sob carga concorrente.
 
 ### `150-api-restore.sh` - API Restore
 
@@ -343,6 +394,7 @@ chmod +x *.sh
 ./41-finalizer-under-load.sh
 ./50-leader-failover.sh
 ./60-leader-failover-during-reconcile.sh
+./65-operator-crash-loop.sh
 ./70-invalid-spec.sh
 ./80-periodic-reconcile-no-events.sh
 ./90-spec-update-rollout.sh
@@ -375,6 +427,7 @@ tests/e2e/
 ├── 41-finalizer-under-load.sh       # Finalizer sob carga
 ├── 50-leader-failover.sh            # Leader failover
 ├── 60-leader-failover-during-reconcile.sh  # Leader failover durante reconcile
+├── 65-operator-crash-loop.sh        # Operator crash-loop durante reconcile (múltiplos crashes)
 ├── 70-invalid-spec.sh               # Spec inválida
 ├── 80-periodic-reconcile-no-events.sh  # Reconciliação periódica sem eventos
 ├── 90-spec-update-rollout.sh        # Update de spec com rollout

@@ -11,7 +11,12 @@ log_info "Deleting QdrantCollection first (if it exists)..."
 kubectl delete qdrantcollections my-collection -n default 2>/dev/null || true
 
 log_info "Waiting for collection to be deleted..."
-sleep 5
+wait_for_deletion "qdrantcollections" "my-collection" "default" 30 || {
+  # Collection may not exist, which is fine
+  if ! kubectl get qdrantcollections my-collection -n default 2>/dev/null; then
+    log_info "Collection already deleted or never existed"
+  fi
+}
 
 log_info "Deleting QdrantCluster (should trigger finalizer)..."
 kubectl delete qdrantcluster my-cluster -n default

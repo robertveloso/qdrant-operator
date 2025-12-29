@@ -41,18 +41,7 @@ if ! kubectl rollout status statefulset ${CLUSTER_NAME} -n default --timeout=120
   exit 1
 fi
 
-log_info "Waiting for cluster to be Healthy..."
-timeout=60
-elapsed=0
-while [ $elapsed -lt $timeout ]; do
-  STATUS=$(kubectl get qdrantcluster ${CLUSTER_NAME} -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
-  if [ "${STATUS}" = "Healthy" ] || [ "${STATUS}" = "Running" ]; then
-    log_info "✅ Cluster is ${STATUS}"
-    break
-  fi
-  sleep 2
-  elapsed=$((elapsed + 2))
-done
+wait_for_cluster_healthy "${CLUSTER_NAME}" "default" 60
 
 # Verify initial PVC size
 PVC_NAME="qdrant-storage-${CLUSTER_NAME}-0"
@@ -69,30 +58,7 @@ log_info "Expanding PVC size from ${INITIAL_SIZE} to ${EXPANDED_SIZE}..."
 kubectl patch qdrantcluster ${CLUSTER_NAME} -n default --type='merge' -p="{\"spec\":{\"persistence\":{\"size\":\"${EXPANDED_SIZE}\"}}}"
 
 log_info "Waiting for operator to detect and expand PVC (timeout: 60s)..."
-timeout=60
-elapsed=0
-pvc_expanded=false
-
-while [ $elapsed -lt $timeout ]; do
-  CURRENT_SIZE=$(kubectl get pvc ${PVC_NAME} -n default -o jsonpath='{.spec.resources.requests.storage}' 2>/dev/null || echo "")
-
-  if [ "${CURRENT_SIZE}" = "${EXPANDED_SIZE}" ]; then
-    log_info "✅ PVC size updated to ${EXPANDED_SIZE}"
-    pvc_expanded=true
-    break
-  fi
-
-  log_info "Waiting for PVC expansion... (${elapsed}s/${timeout}s) - Current size: ${CURRENT_SIZE}"
-  sleep 5
-  elapsed=$((elapsed + 5))
-done
-
-if [ "${pvc_expanded}" = "false" ]; then
-  log_error "PVC was not expanded within timeout"
-  kubectl get pvc ${PVC_NAME} -n default -o yaml
-  kubectl get qdrantcluster ${CLUSTER_NAME} -n default -o yaml
-  exit 1
-fi
+wait_for_status "pvc" "${PVC_NAME}" "{.spec.resources.requests.storage}" "${EXPANDED_SIZE}" "default" 60
 
 # Verify PVC status shows expansion
 PVC_CONDITION=$(kubectl get pvc ${PVC_NAME} -n default -o jsonpath='{.status.conditions[?(@.type=="Resizing")].status}' 2>/dev/null || echo "")

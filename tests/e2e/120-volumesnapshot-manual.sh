@@ -37,22 +37,24 @@ EOF
 wait_for_resource "statefulset" "${CLUSTER_NAME}" "default" 60
 kubectl rollout status statefulset ${CLUSTER_NAME} -n default --timeout=120s
 
-log_info "Waiting for cluster to be Healthy..."
-timeout=60
-elapsed=0
-while [ $elapsed -lt $timeout ]; do
-  STATUS=$(kubectl get qdrantcluster ${CLUSTER_NAME} -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
-  if [ "${STATUS}" = "Healthy" ] || [ "${STATUS}" = "Running" ]; then
-    log_info "✅ Cluster is ${STATUS}"
-    break
-  fi
-  sleep 2
-  elapsed=$((elapsed + 2))
-done
+wait_for_cluster_healthy "${CLUSTER_NAME}" "default" 60
 
-# Wait a bit for snapshot creation
+# Wait for VolumeSnapshot to be created
 log_info "Waiting for VolumeSnapshot to be created..."
-sleep 10
+wait_for_resource "volumesnapshot" "" "default" 30 || {
+  # If no specific snapshot name, check if any exist with labels
+  timeout=30
+  elapsed=0
+  while [ $elapsed -lt $timeout ]; do
+    SNAPSHOTS=$(kubectl get volumesnapshots -n default -l clustername=${CLUSTER_NAME},component=qdrant --no-headers 2>/dev/null | wc -l || echo "0")
+    if [ "${SNAPSHOTS}" -gt "0" ]; then
+      log_info "✅ Found ${SNAPSHOTS} VolumeSnapshot(s)"
+      break
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+}
 
 # Verify VolumeSnapshot was created
 PVC_NAME="qdrant-storage-${CLUSTER_NAME}-0"

@@ -89,8 +89,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-  # Shared setup for all E2E tests
-  e2e-setup:
+  # Core operator functionality tests
+  e2e-core:
     runs-on: ubuntu-latest
     needs: build-image
     steps:
@@ -114,18 +114,8 @@ jobs:
           kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s || {
             echo "❌ Rollout failed or timed out. Checking pod status..."
             kubectl get pods -n qdrant-operator -l app=qdrant-operator
-            echo ""
-            echo "📋 Deployment description:"
             kubectl describe deployment qdrant-operator -n qdrant-operator
-            echo ""
-            echo "📋 Recent events:"
             kubectl get events -n qdrant-operator --sort-by='.lastTimestamp' | tail -20
-            echo ""
-            echo "📋 Pod descriptions:"
-            kubectl get pods -n qdrant-operator -l app=qdrant-operator -o name | xargs -I {} kubectl describe {} -n qdrant-operator || true
-            echo ""
-            echo "📋 Pod logs:"
-            kubectl get pods -n qdrant-operator -l app=qdrant-operator -o name | xargs -I {} kubectl logs {} -n qdrant-operator --tail=30 || true
             exit 1
           }
 
@@ -137,59 +127,26 @@ jobs:
             exit 1
           }
 
-          echo "📋 Verifying environment variables in pod..."
-          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
-          echo "   POD_NAME: ${POD_NAME}"
-          # Wait a moment for container to be fully ready
-          sleep 2
-          # Try to verify env vars, but don't fail if it doesn't work (non-critical check)
-          if kubectl exec -n qdrant-operator ${POD_NAME} -c operator -- env 2>/dev/null | grep -E "POD_NAME|POD_NAMESPACE"; then
-            echo "✅ Environment variables verified"
-          else
-            echo "⚠️ Warning: Could not verify environment variables (this is non-critical, pod is ready)"
-          fi
-
-          echo "📋 Getting operator logs..."
-          kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
-
           echo "⏳ Waiting for operator to become leader (timeout: 30s)..."
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
           timeout=30
           elapsed=0
           while [ $elapsed -lt $timeout ]; do
-            if kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=10 2>/dev/null | grep -q "LEADER"; then
-              echo "✅ Operator is LEADER!"
+            # Check Lease first (more reliable)
+            HOLDER=$(kubectl get lease qdrant-operator -n qdrant-operator -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || echo "")
+            if [ "${HOLDER}" = "${POD_NAME}" ]; then
+              echo "✅ Operator is LEADER! (verified via Lease)"
+              break
+            fi
+            # Fallback to logs
+            if kubectl logs -n qdrant-operator "${POD_NAME}" --tail=10 2>/dev/null | grep -q "LEADER"; then
+              echo "✅ Operator is LEADER! (verified via logs)"
               break
             fi
             echo "   Waiting for operator to become leader... (${elapsed}s/${timeout}s)"
             sleep 2
             elapsed=$((elapsed + 2))
           done
-
-          if ! kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=10 2>/dev/null | grep -q "LEADER"; then
-            echo "⚠️ Warning: Operator may not be leader yet, but continuing..."
-            kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=20
-          fi
-
-  # Core operator functionality tests
-  e2e-core:
-    runs-on: ubuntu-latest
-    needs: e2e-setup
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install K3S
-        uses: nolar/setup-k3d-k3s@v1
-        with:
-          version: v1.32.11+k3s1
-      - name: Install qdrant-operator
-        run: |
-          kubectl apply -f deploy/crds/
-          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
-          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
-              -e "s|replicas: 3|replicas: 1|" \
-              deploy/operator.yaml | kubectl apply -f -
-          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
-          sleep 10
       - name: Run core E2E tests
         run: |
           chmod +x tests/e2e/*.sh
@@ -206,7 +163,7 @@ jobs:
   # High Availability tests
   e2e-ha:
     runs-on: ubuntu-latest
-    needs: e2e-setup
+    needs: build-image
     steps:
       - uses: actions/checkout@v4
       - name: Install K3S
@@ -222,7 +179,18 @@ jobs:
               deploy/operator.yaml | kubectl apply -f -
           kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
           kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
-          sleep 10
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
+          timeout=30
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            HOLDER=$(kubectl get lease qdrant-operator -n qdrant-operator -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || echo "")
+            if [ "${HOLDER}" = "${POD_NAME}" ] || kubectl logs -n qdrant-operator "${POD_NAME}" --tail=10 2>/dev/null | grep -q "LEADER"; then
+              echo "✅ Operator is LEADER!"
+              break
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
       - name: Run HA E2E tests
         run: |
           chmod +x tests/e2e/*.sh
@@ -230,12 +198,13 @@ jobs:
           tests/e2e/00-setup.sh
           tests/e2e/50-leader-failover.sh
           tests/e2e/60-leader-failover-during-reconcile.sh
+          tests/e2e/65-operator-crash-loop.sh
           echo "✅ HA E2E tests passed!"
 
   # Cleanup and lifecycle tests
   e2e-cleanup:
     runs-on: ubuntu-latest
-    needs: e2e-setup
+    needs: build-image
     steps:
       - uses: actions/checkout@v4
       - name: Install K3S
@@ -251,7 +220,18 @@ jobs:
               deploy/operator.yaml | kubectl apply -f -
           kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
           kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
-          sleep 10
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
+          timeout=30
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            HOLDER=$(kubectl get lease qdrant-operator -n qdrant-operator -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || echo "")
+            if [ "${HOLDER}" = "${POD_NAME}" ] || kubectl logs -n qdrant-operator "${POD_NAME}" --tail=10 2>/dev/null | grep -q "LEADER"; then
+              echo "✅ Operator is LEADER!"
+              break
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
       - name: Run cleanup E2E tests
         run: |
           chmod +x tests/e2e/*.sh
@@ -265,7 +245,7 @@ jobs:
   # Feature tests (PVC, VolumeSnapshot)
   e2e-features:
     runs-on: ubuntu-latest
-    needs: e2e-setup
+    needs: build-image
     steps:
       - uses: actions/checkout@v4
       - name: Install K3S
@@ -281,7 +261,18 @@ jobs:
               deploy/operator.yaml | kubectl apply -f -
           kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
           kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
-          sleep 10
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
+          timeout=30
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            HOLDER=$(kubectl get lease qdrant-operator -n qdrant-operator -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || echo "")
+            if [ "${HOLDER}" = "${POD_NAME}" ] || kubectl logs -n qdrant-operator "${POD_NAME}" --tail=10 2>/dev/null | grep -q "LEADER"; then
+              echo "✅ Operator is LEADER!"
+              break
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
       - name: Run features E2E tests
         run: |
           chmod +x tests/e2e/*.sh
@@ -295,7 +286,7 @@ jobs:
   # API REST tests
   e2e-api:
     runs-on: ubuntu-latest
-    needs: e2e-setup
+    needs: build-image
     steps:
       - uses: actions/checkout@v4
       - name: Install K3S
@@ -311,7 +302,18 @@ jobs:
               deploy/operator.yaml | kubectl apply -f -
           kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
           kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
-          sleep 10
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}')
+          timeout=30
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            HOLDER=$(kubectl get lease qdrant-operator -n qdrant-operator -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || echo "")
+            if [ "${HOLDER}" = "${POD_NAME}" ] || kubectl logs -n qdrant-operator "${POD_NAME}" --tail=10 2>/dev/null | grep -q "LEADER"; then
+              echo "✅ Operator is LEADER!"
+              break
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
       - name: Run API E2E tests
         run: |
           chmod +x tests/e2e/*.sh

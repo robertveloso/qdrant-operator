@@ -21,8 +21,17 @@ kubectl delete qdrantcluster my-cluster -n default --wait=false
 
 # Give a moment for deletionTimestamp to be set, then delete StatefulSet
 # This simulates the StatefulSet being already deleted when finalizer cleanup runs
-log_info "Waiting a moment for deletionTimestamp to be set..."
-sleep 1
+log_info "Waiting for deletionTimestamp to be set..."
+timeout=5
+elapsed=0
+while [ $elapsed -lt $timeout ]; do
+  if kubectl get qdrantcluster my-cluster -n default -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null | grep -q .; then
+    log_info "✅ deletionTimestamp set"
+    break
+  fi
+  sleep 1
+  elapsed=$((elapsed + 1))
+done
 
 log_info "Manually deleting StatefulSet to simulate partial cleanup (StatefulSet already gone)..."
 kubectl delete statefulset my-cluster -n default --wait=false 2>/dev/null || true

@@ -11,26 +11,31 @@ log_info "Forcing drift: scaling StatefulSet to 0 replicas..."
 kubectl scale sts my-cluster -n default --replicas=0
 
 log_info "Waiting for operator to detect and correct drift (timeout: 60s)..."
-timeout=60
-elapsed=0
+# Wait for replicas to be restored to 1
+wait_for_status "statefulset" "my-cluster" "{.spec.replicas}" "1" "default" 60
 
+log_info "✅ Drift corrected! Operator restored replicas to 1"
+
+# Verify StatefulSet is stable (check that it doesn't change back)
+log_info "Verifying StatefulSet is stable..."
+timeout=10
+elapsed=0
+stable=true
 while [ $elapsed -lt $timeout ]; do
   replicas=$(kubectl get sts my-cluster -n default -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-
-  log_info "Current replicas: ${replicas} (expected: 1)"
-
-  if [ "${replicas}" = "1" ]; then
-    log_info "✅ Drift corrected! Operator restored replicas to 1"
-
-    # Wait a bit more to ensure StatefulSet is stable
-    sleep 5
-    log_info "✅ Drift detection test passed"
-    exit 0
+  if [ "${replicas}" != "1" ]; then
+    log_error "StatefulSet replicas changed to ${replicas} (expected: 1)"
+    stable=false
+    break
   fi
-
-  sleep 5
-  elapsed=$((elapsed + 5))
+  sleep 2
+  elapsed=$((elapsed + 2))
 done
+
+if [ "${stable}" = "true" ]; then
+  log_info "✅ Drift detection test passed"
+  exit 0
+fi
 
 log_error "Drift was not corrected within timeout"
 log_info "StatefulSet spec:"

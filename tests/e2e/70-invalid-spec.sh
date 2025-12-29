@@ -21,9 +21,13 @@ spec:
 EOF
 
 log_info "Waiting for operator to process invalid spec (timeout: 30s)..."
-sleep 10
+# Wait for resource to be created first
+wait_for_resource "qdrantcluster" "invalid-image-cluster" "default" 30
 
-# Resource should be created (passes CRD validation), check if operator set error status
+# Wait for operator to set error status
+wait_for_status "qdrantcluster" "invalid-image-cluster" "{.status.qdrantStatus}" "Error" "default" 30
+
+# Get error message
 STATUS=$(kubectl get qdrantcluster invalid-image-cluster -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
 ERROR_MSG=$(kubectl get qdrantcluster invalid-image-cluster -n default -o jsonpath='{.status.errorMessage}' 2>/dev/null || echo "")
 
@@ -74,9 +78,13 @@ spec:
 EOF
 
 log_info "Waiting for operator to process invalid collection spec (timeout: 30s)..."
-sleep 10
+# Wait for resource to be created first
+wait_for_resource "qdrantcollections" "invalid-vector-collection" "default" 30
 
-# Resource should be created (passes CRD validation), check if operator set error status
+# Wait for operator to set error status
+wait_for_status "qdrantcollections" "invalid-vector-collection" "{.status.qdrantStatus}" "Error" "default" 30
+
+# Get error message
 STATUS=$(kubectl get qdrantcollections invalid-vector-collection -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
 ERROR_MSG=$(kubectl get qdrantcollections invalid-vector-collection -n default -o jsonpath='{.status.errorMessage}' 2>/dev/null || echo "")
 
