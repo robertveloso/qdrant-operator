@@ -37,7 +37,7 @@ if [ -n "${QDRANT_POD}" ]; then
   # Use port-forward to delete collection (Qdrant image doesn't have curl)
   log_info "Attempting to delete collection in Qdrant via port-forward..."
   kubectl port-forward -n default "pod/${QDRANT_POD}" 6333:6333 > /dev/null 2>&1 &
-  local pf_pid=$!
+  PF_PID=$!
   sleep 2
 
   DELETE_RESPONSE=$(curl -s -X DELETE "http://localhost:6333/collections/my-collection" 2>/dev/null || echo "")
@@ -45,8 +45,8 @@ if [ -n "${QDRANT_POD}" ]; then
     log_info "Delete response: ${DELETE_RESPONSE}"
   fi
 
-  kill "${pf_pid}" 2>/dev/null || true
-  wait "${pf_pid}" 2>/dev/null || true
+  kill "${PF_PID}" 2>/dev/null || true
+  wait "${PF_PID}" 2>/dev/null || true
   sleep 2
 fi
 
