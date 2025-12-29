@@ -259,7 +259,9 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
           return; // Success - collection exists
         }
       } catch (verifyErr) {
-        log(`⚠️ Could not verify collection exists, but treating 409 as success: ${verifyErr.message}`);
+        log(
+          `⚠️ Could not verify collection exists, but treating 409 as success: ${verifyErr.message}`
+        );
         return; // Still treat as success - 409 means it exists
       }
       return; // Collection exists, reconciliation successful
