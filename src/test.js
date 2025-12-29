@@ -2,6 +2,9 @@ import test from 'ava';
 import {
   clusterTemplate,
   clusterSecretTemplate,
+  clusterAuthSecretTemplate,
+  clusterReadSecretTemplate,
+  clusterConfigmapTemplate,
   genericTemplate
 } from './cluster-template.js';
 
@@ -521,4 +524,250 @@ test('Complete cluster headless service template', (t) => {
     expectedCompleteServiceTemplate,
     'Headless service template should have correct clusterIP and ports'
   );
+});
+
+test('Cluster auth secret template without read-only apikey', (t) => {
+  const actual = clusterAuthSecretTemplate(
+    clusterCompletePayload,
+    'testkey',
+    'false'
+  );
+  t.is(actual.kind, 'Secret');
+  t.is(actual.metadata.name, 'my-cluster-auth-config');
+  t.truthy(actual.data['local.yaml']);
+  // Decode and verify content
+  const decoded = atob(actual.data['local.yaml']);
+  t.true(decoded.includes('api_key: testkey'));
+  t.false(decoded.includes('read_only_api_key'));
+});
+
+test('Cluster auth secret template with read-only apikey', (t) => {
+  const actual = clusterAuthSecretTemplate(
+    clusterCompletePayload,
+    'testkey',
+    'readonlykey'
+  );
+  t.is(actual.kind, 'Secret');
+  t.is(actual.metadata.name, 'my-cluster-auth-config');
+  t.truthy(actual.data['local.yaml']);
+  // Decode and verify content
+  const decoded = atob(actual.data['local.yaml']);
+  t.true(decoded.includes('api_key: testkey'));
+  t.true(decoded.includes('read_only_api_key: readonlykey'));
+});
+
+test('Cluster read-only secret template', (t) => {
+  const actual = clusterReadSecretTemplate(
+    clusterCompletePayload,
+    'readonlykey'
+  );
+  t.is(actual.kind, 'Secret');
+  t.is(actual.metadata.name, 'my-cluster-read-apikey');
+  t.is(actual.data['api-key'], btoa('readonlykey'));
+});
+
+test('Cluster configmap template with config', (t) => {
+  const actual = clusterConfigmapTemplate(clusterCompletePayload);
+  t.is(actual.kind, 'ConfigMap');
+  t.is(actual.metadata.name, 'my-cluster');
+  t.truthy(actual.data['production.yaml']);
+  // Verify YAML content includes config values
+  const yamlContent = actual.data['production.yaml'];
+  t.true(yamlContent.includes('consensus:'));
+  t.true(yamlContent.includes('tick_period_ms: 50'));
+});
+
+test('Cluster configmap template without config', (t) => {
+  const actual = clusterConfigmapTemplate(clusterMinimalPayload);
+  t.is(actual.kind, 'ConfigMap');
+  t.is(actual.metadata.name, 'my-cluster');
+  t.is(actual.data['production.yaml'], '');
+});
+
+test('NetworkPolicy template', (t) => {
+  const actual = genericTemplate(
+    clusterCompletePayload,
+    'networkpolicy.jsr'
+  );
+  t.is(actual.kind, 'NetworkPolicy');
+  t.is(actual.metadata.name, 'my-cluster');
+  t.deepEqual(actual.spec.podSelector.matchLabels, {
+    clustername: 'my-cluster',
+    component: 'qdrant'
+  });
+  t.true(actual.spec.policyTypes.includes('Ingress'));
+  t.true(actual.spec.policyTypes.includes('Egress'));
+  t.truthy(actual.spec.ingress);
+  t.truthy(actual.spec.egress);
+});
+
+test('PodDisruptionBudget template', (t) => {
+  const actual = genericTemplate(clusterCompletePayload, 'pdb.jsr');
+  t.is(actual.kind, 'PodDisruptionBudget');
+  t.is(actual.metadata.name, 'my-cluster');
+  t.is(actual.spec.minAvailable, '50%');
+  t.deepEqual(actual.spec.selector.matchLabels, {
+    clustername: 'my-cluster',
+    component: 'qdrant'
+  });
+});
+
+test('Service template (ClusterIP)', (t) => {
+  const actual = genericTemplate(clusterCompletePayload, 'service.jsr');
+  t.is(actual.kind, 'Service');
+  t.is(actual.metadata.name, 'my-cluster');
+  t.is(actual.spec.type, 'ClusterIP');
+  t.is(actual.spec.ports.length, 3);
+  t.true(actual.spec.ports.some((p) => p.name === 'http' && p.port === 6333));
+  t.true(actual.spec.ports.some((p) => p.name === 'grpc' && p.port === 6334));
+  t.true(actual.spec.ports.some((p) => p.name === 'p2p' && p.port === 6335));
+});
+
+test('Service template (NodePort)', (t) => {
+  const nodePortPayload = {
+    ...clusterCompletePayload,
+    spec: { ...clusterCompletePayload.spec, service: 'NodePort' }
+  };
+  const actual = genericTemplate(nodePortPayload, 'service.jsr');
+  t.is(actual.spec.type, 'NodePort');
+});
+
+test('Service template (LoadBalancer)', (t) => {
+  const lbPayload = {
+    ...clusterCompletePayload,
+    spec: { ...clusterCompletePayload.spec, service: 'LoadBalancer' }
+  };
+  const actual = genericTemplate(lbPayload, 'service.jsr');
+  t.is(actual.spec.type, 'LoadBalancer');
+});
+
+test('Edge case: Empty arrays for additional volumes and mounts', (t) => {
+  const payloadWithEmptyArrays = {
+    ...clusterMinimalPayload,
+    spec: {
+      ...clusterMinimalPayload.spec,
+      additionalVolumeMounts: [],
+      additionalVolumes: [],
+      sidecarContainers: []
+    }
+  };
+  const actual = clusterTemplate(payloadWithEmptyArrays);
+  t.truthy(actual);
+  t.is(actual.kind, 'StatefulSet');
+  // Should not crash with empty arrays
+  t.truthy(actual.spec.template.spec.containers);
+  t.truthy(actual.spec.template.spec.volumes);
+});
+
+test('Edge case: Missing optional fields', (t) => {
+  const minimalPayload = {
+    ...clusterMinimalPayload,
+    spec: {
+      replicas: 1,
+      image: 'qdrant/qdrant:v1.16.3',
+      service: 'ClusterIP',
+      apikey: 'false',
+      readApikey: 'false',
+      tls: { enabled: false },
+      // Include required array fields as empty arrays
+      additionalVolumeMounts: [],
+      additionalVolumes: [],
+      sidecarContainers: [],
+      tolerations: [],
+      topologySpreadConstraints: [],
+      nodeAffinity: {},
+      podAntiAffinity: {},
+      resources: {}
+    }
+  };
+  const actual = clusterTemplate(minimalPayload);
+  t.truthy(actual);
+  t.is(actual.kind, 'StatefulSet');
+  // Should handle missing fields gracefully
+  t.truthy(actual.spec.template.spec.containers[0]);
+});
+
+test('Job backup template structure', (t) => {
+  const backupJobData = {
+    metadata: {
+      name: 'test-collection',
+      namespace: 'default',
+      resourceVersion: '123'
+    },
+    spec: {
+      cluster: 'my-cluster',
+      snapshots: {
+        s3CredentialsSecretName: 'bucket-credentials',
+        bucketName: 'test-bucket',
+        s3EndpointURL: 'https://s3.amazonaws.com'
+      }
+    },
+    apikeyEnabled: true,
+    jobImage: 'qdrant/backup:latest'
+  };
+  const actual = genericTemplate(backupJobData, 'job-backup.jsr');
+  t.is(actual.kind, 'Job');
+  t.is(actual.metadata.name, 'test-collection-backup-123');
+  t.is(actual.spec.template.spec.containers[0].name, 'backup');
+  t.is(actual.spec.template.spec.containers[0].image, 'qdrant/backup:latest');
+  // Verify environment variables
+  const envVars = actual.spec.template.spec.containers[0].env;
+  t.true(envVars.some((e) => e.name === 'CLUSTER_NAME' && e.value === 'my-cluster'));
+  t.true(envVars.some((e) => e.name === 'BUCKET_NAME' && e.value === 'test-bucket'));
+});
+
+test('Job restore template structure', (t) => {
+  const restoreJobData = {
+    metadata: {
+      name: 'test-restore',
+      namespace: 'default',
+      resourceVersion: '456'
+    },
+    spec: {
+      cluster: 'my-cluster',
+      snapshots: {
+        s3CredentialsSecretName: 'bucket-credentials',
+        bucketName: 'test-bucket',
+        s3EndpointURL: 'https://s3.amazonaws.com',
+        restoreSnapshotName: 'backup-2024-01-01'
+      }
+    },
+    collectionName: 'test-collection',
+    restoreSnapshotName: 'backup-2024-01-01',
+    apikeyEnabled: true,
+    connectionMethod: 'http',
+    replicas: 3,
+    jobImage: 'qdrant/restore:latest'
+  };
+  const actual = genericTemplate(restoreJobData, 'job-restore.jsr');
+  t.is(actual.kind, 'Job');
+  t.is(actual.metadata.name, 'test-restore-restore-456');
+  t.is(actual.spec.template.spec.containers[0].name, 'restore');
+  // Verify restore-specific env vars
+  const envVars = actual.spec.template.spec.containers[0].env;
+  t.true(envVars.some((e) => e.name === 'COLLECTION_NAME' && e.value === 'test-collection'));
+  t.true(envVars.some((e) => e.name === 'SNAPSHOT_NAME' && e.value === 'backup-2024-01-01'));
+});
+
+test('Job volumesnapshot template structure', (t) => {
+  const snapshotJobData = {
+    metadata: {
+      name: 'my-cluster',
+      namespace: 'default',
+      uid: 'test-uid'
+    },
+    apiVersion: 'qdrant.operator/v1alpha1',
+    kind: 'QdrantCluster',
+    replicas: 3,
+    snapshotClassName: 'csi-snapshotter',
+    timestamp: '1234567890'
+  };
+  const actual = genericTemplate(snapshotJobData, 'job-volumesnapshot.jsr');
+  t.is(actual.kind, 'Job');
+  t.true(actual.metadata.name.includes('my-cluster-volumesnapshot'));
+  t.is(actual.spec.template.spec.containers[0].name, 'volumesnapshot');
+  t.is(actual.spec.template.spec.serviceAccountName, 'qdrant-operator-sa');
+  // Verify owner reference
+  t.truthy(actual.metadata.ownerReferences);
+  t.is(actual.metadata.ownerReferences[0].kind, 'QdrantCluster');
 });

@@ -76,7 +76,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-  integration-test:
+  # Shared setup for all E2E tests
+  e2e-setup:
     runs-on: ubuntu-latest
     needs: build-image
     steps:
@@ -155,75 +156,157 @@ jobs:
             echo "⚠️ Warning: Operator may not be leader yet, but continuing..."
             kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=20
           fi
-      - name: Run E2E operator tests
+
+  # Core operator functionality tests
+  e2e-core:
+    runs-on: ubuntu-latest
+    needs: e2e-setup
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install K3S
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.32.11+k3s1
+      - name: Install qdrant-operator
+        run: |
+          kubectl apply -f deploy/crds/
+          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
+          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
+              -e "s|replicas: 3|replicas: 1|" \
+              deploy/operator.yaml | kubectl apply -f -
+          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
+          sleep 10
+      - name: Run core E2E tests
         run: |
           chmod +x tests/e2e/*.sh
-
-          echo "🧪 Running E2E test suite..."
-          echo ""
-
-          # Setup: Create cluster and collection
+          echo "🧪 Running Core E2E tests..."
           tests/e2e/00-setup.sh
-
-          # Happy path: Verify collection is accessible
           tests/e2e/10-happy-path.sh
-
-          # Drift detection: Verify operator corrects manual changes
           tests/e2e/20-drift.sh
-
-          # Idempotency: Verify no unnecessary rollouts
           tests/e2e/30-idempotency.sh
-
-          # Finalizer: Verify proper cleanup (deletes cluster and collection)
-          tests/e2e/40-finalizer.sh
-
-          # Finalizer under load: Verify cleanup during cluster activity
-          # Note: This test creates a new cluster/collection since the previous
-          # test (40-finalizer.sh) deletes them. It tests the worst-case
-          # scenario: deletion while cluster is under active use.
-          tests/e2e/41-finalizer-under-load.sh
-
-          # Leader failover: Verify HA behavior
-          tests/e2e/50-leader-failover.sh
-
-          # Leader failover during reconcile: Verify HA during active operations
-          tests/e2e/60-leader-failover-during-reconcile.sh
-
-          # Invalid spec: Verify graceful handling of invalid specs
           tests/e2e/70-invalid-spec.sh
-
-          # Periodic reconcile: Verify safety net works without watch events
           tests/e2e/80-periodic-reconcile-no-events.sh
-
-          # Spec update rollout: Verify controlled rollouts on spec changes
           tests/e2e/90-spec-update-rollout.sh
+          echo "✅ Core E2E tests passed!"
 
-          # Delete partial cleanup: Verify idempotent cleanup
+  # High Availability tests
+  e2e-ha:
+    runs-on: ubuntu-latest
+    needs: e2e-setup
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install K3S
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.32.11+k3s1
+      - name: Install qdrant-operator
+        run: |
+          kubectl apply -f deploy/crds/
+          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
+          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
+              -e "s|replicas: 3|replicas: 1|" \
+              deploy/operator.yaml | kubectl apply -f -
+          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
+          sleep 10
+      - name: Run HA E2E tests
+        run: |
+          chmod +x tests/e2e/*.sh
+          echo "🧪 Running HA E2E tests..."
+          tests/e2e/00-setup.sh
+          tests/e2e/50-leader-failover.sh
+          tests/e2e/60-leader-failover-during-reconcile.sh
+          echo "✅ HA E2E tests passed!"
+
+  # Cleanup and lifecycle tests
+  e2e-cleanup:
+    runs-on: ubuntu-latest
+    needs: e2e-setup
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install K3S
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.32.11+k3s1
+      - name: Install qdrant-operator
+        run: |
+          kubectl apply -f deploy/crds/
+          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
+          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
+              -e "s|replicas: 3|replicas: 1|" \
+              deploy/operator.yaml | kubectl apply -f -
+          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
+          sleep 10
+      - name: Run cleanup E2E tests
+        run: |
+          chmod +x tests/e2e/*.sh
+          echo "🧪 Running Cleanup E2E tests..."
+          tests/e2e/00-setup.sh
+          tests/e2e/40-finalizer.sh
+          tests/e2e/41-finalizer-under-load.sh
           tests/e2e/100-delete-partial-cleanup.sh
+          echo "✅ Cleanup E2E tests passed!"
 
-          # PVC auto resize: Verify automatic PVC expansion
+  # Feature tests (PVC, VolumeSnapshot)
+  e2e-features:
+    runs-on: ubuntu-latest
+    needs: e2e-setup
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install K3S
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.32.11+k3s1
+      - name: Install qdrant-operator
+        run: |
+          kubectl apply -f deploy/crds/
+          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
+          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
+              -e "s|replicas: 3|replicas: 1|" \
+              deploy/operator.yaml | kubectl apply -f -
+          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
+          sleep 10
+      - name: Run features E2E tests
+        run: |
+          chmod +x tests/e2e/*.sh
+          echo "🧪 Running Features E2E tests..."
+          tests/e2e/00-setup.sh
           tests/e2e/110-pvc-auto-resize.sh
-
-          # VolumeSnapshot manual: Verify manual snapshot creation
           tests/e2e/120-volumesnapshot-manual.sh
-
-          # VolumeSnapshot scheduled: Verify scheduled snapshots via CronJob
           tests/e2e/130-volumesnapshot-scheduled.sh
+          echo "✅ Features E2E tests passed!"
 
-          # API collections: Verify API endpoints for collections
+  # API REST tests
+  e2e-api:
+    runs-on: ubuntu-latest
+    needs: e2e-setup
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install K3S
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.32.11+k3s1
+      - name: Install qdrant-operator
+        run: |
+          kubectl apply -f deploy/crds/
+          IMAGE_TAG="ghcr.io/${{ github.repository }}/qdrant-operator:${{ github.sha }}"
+          sed -e "s|image: .*$|image: ${IMAGE_TAG}|" \
+              -e "s|replicas: 3|replicas: 1|" \
+              deploy/operator.yaml | kubectl apply -f -
+          kubectl rollout status deploy/qdrant-operator -n qdrant-operator --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator --timeout=60s
+          sleep 10
+      - name: Run API E2E tests
+        run: |
+          chmod +x tests/e2e/*.sh
+          echo "🧪 Running API E2E tests..."
+          tests/e2e/00-setup.sh
           tests/e2e/140-api-collections.sh
-
-          # API restore: Verify restore operations via API
           tests/e2e/150-api-restore.sh
-
-          # API authentication: Verify API authentication
           tests/e2e/160-api-authentication.sh
-
-          # API templates: Verify template CRD and API endpoints
           tests/e2e/170-api-templates.sh
-
-          # API integration: Full E2E test - API → CRD → Reconciler → Qdrant
           tests/e2e/180-api-integration.sh
-
-          echo ""
-          echo "✅ All E2E tests passed!"
+          echo "✅ API E2E tests passed!"
