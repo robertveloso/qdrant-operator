@@ -78,7 +78,9 @@ const createTemplate = async (req, res) => {
 
   if (!/^[a-z0-9-]+$/.test(body.name)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'name must contain only lowercase letters, numbers, and hyphens' }));
+    res.end(
+      JSON.stringify({ error: 'name must contain only lowercase letters, numbers, and hyphens' })
+    );
     return;
   }
 
@@ -113,11 +115,13 @@ const createTemplate = async (req, res) => {
     log(`✅ Created QdrantCollectionTemplate CR via API: ${body.name}`);
 
     res.writeHead(201, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      id: created.metadata.name,
-      name: created.spec.name,
-      message: 'Template created successfully'
-    }));
+    res.end(
+      JSON.stringify({
+        id: created.metadata.name,
+        name: created.spec.name,
+        message: 'Template created successfully'
+      })
+    );
   } catch (err) {
     if (err.statusCode === 409) {
       res.writeHead(409, { 'Content-Type': 'application/json' });
@@ -156,4 +160,3 @@ export const templatesRouter = async (req, res, pathname, method) => {
 
   return false;
 };
-

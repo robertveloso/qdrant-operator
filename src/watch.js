@@ -27,9 +27,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
     );
   }
   if (name === '' || namespace === '') {
-    throw new Error(
-      `Parameters cannot be empty: name="${name}", namespace="${namespace}"`
-    );
+    throw new Error(`Parameters cannot be empty: name="${name}", namespace="${namespace}"`);
   }
 
   // Ensure parameters are explicitly strings (defensive programming)
@@ -55,9 +53,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
     log(
       `safeReadNamespacedLease: About to call API with name="${nameStr}", namespace="${namespaceStr}"`
     );
-    log(
-      `   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`
-    );
+    log(`   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`);
     log(
       `   nameStr === null: ${nameStr === null}, nameStr === undefined: ${nameStr === undefined}`
     );
@@ -98,10 +94,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
       errorMsg.includes('not found') ||
       errorMsg.includes('NotFound');
 
-    if (
-      errorMsg.includes('Required parameter') ||
-      errorMsg.includes('was null or undefined')
-    ) {
+    if (errorMsg.includes('Required parameter') || errorMsg.includes('was null or undefined')) {
       // Log detailed error information if in debug mode
       if (process.env.DEBUG_MODE === 'true') {
         log(`Error with object format, trying positional: ${errorMsg}`);
@@ -125,9 +118,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
     // Log detailed error information for other errors (only in debug mode)
     if (process.env.DEBUG_MODE === 'true') {
       log(`Error in safeReadNamespacedLease: ${errorMsg}`);
-      log(
-        `   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`
-      );
+      log(`   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`);
       log(`   Error stack: ${err.stack || 'No stack trace'}`);
     }
     throw err;
@@ -139,10 +130,7 @@ const INITIAL_RECONNECT_DELAY = 2000; // Começar com 2 segundos
 
 // Calculate exponential backoff delay
 export const getReconnectDelay = (attempts) => {
-  const delay = Math.min(
-    INITIAL_RECONNECT_DELAY * Math.pow(2, attempts),
-    MAX_RECONNECT_DELAY
-  );
+  const delay = Math.min(INITIAL_RECONNECT_DELAY * Math.pow(2, attempts), MAX_RECONNECT_DELAY);
   // Add jitter to avoid thundering herd
   const jitter = Math.random() * 1000;
   return delay + jitter;
@@ -168,9 +156,7 @@ export const onDoneCluster = (err) => {
     if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
       reconnectAttempts.cluster = Math.min(reconnectAttempts.cluster + 1, 10);
       const delay = getReconnectDelay(reconnectAttempts.cluster);
-      log(
-        `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
-      );
+      log(`Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`);
       setTimeout(async () => {
         // List all clusters to catch any that were created while watch was down
         try {
@@ -232,14 +218,9 @@ export const onDoneCollection = (err) => {
 
     // Special handling for rate limiting errors
     if (errorMsg.includes('Too Many Requests') || errorMsg.includes('429')) {
-      reconnectAttempts.collection = Math.min(
-        reconnectAttempts.collection + 1,
-        10
-      );
+      reconnectAttempts.collection = Math.min(reconnectAttempts.collection + 1, 10);
       const delay = getReconnectDelay(reconnectAttempts.collection);
-      log(
-        `Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`
-      );
+      log(`Rate limited. Waiting ${Math.round(delay / 1000)}s before reconnecting...`);
       watchRestarts.inc({ resource_type: 'collection', reason: 'rate_limit' });
       setTimeout(async () => {
         // List all collections to catch any that were created while watch was down
@@ -251,48 +232,34 @@ export const onDoneCollection = (err) => {
             namespace: '',
             plural: 'qdrantcollections'
           });
-          log(
-            `Found ${collectionList.items.length} collection(s) after reconnect, processing...`
-          );
+          log(`Found ${collectionList.items.length} collection(s) after reconnect, processing...`);
           for (const collection of collectionList.items) {
             const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
-            log(
-              `Processing collection "${collection.metadata.name}" from reconnect list...`
-            );
+            log(`Processing collection "${collection.metadata.name}" from reconnect list...`);
             // Skip if deletion is in progress
             if (collection.metadata.deletionTimestamp) {
-              log(
-                `Skipping collection "${collection.metadata.name}" - deletion in progress`
-              );
+              log(`Skipping collection "${collection.metadata.name}" - deletion in progress`);
               continue;
             }
             // Update cache
             collectionCache.set(resourceKey, collection);
             // Reconcile to ensure it exists in Qdrant
             scheduleReconcile(collection, 'collection');
-            log(
-              `Scheduled reconciliation for collection "${collection.metadata.name}"`
-            );
+            log(`Scheduled reconciliation for collection "${collection.metadata.name}"`);
           }
 
           // CRITICAL: Also schedule a delayed reconciliation check to catch any collections
           // that might have been created right after we listed (race condition)
           setTimeout(async () => {
             try {
-              log(
-                'Performing delayed collection check to catch race conditions...'
-              );
-              const delayedList = await k8sCustomApi.listNamespacedCustomObject(
-                {
-                  group: 'qdrant.operator',
-                  version: 'v1alpha1',
-                  namespace: '',
-                  plural: 'qdrantcollections'
-                }
-              );
-              log(
-                `Delayed check found ${delayedList.items.length} collection(s)...`
-              );
+              log('Performing delayed collection check to catch race conditions...');
+              const delayedList = await k8sCustomApi.listNamespacedCustomObject({
+                group: 'qdrant.operator',
+                version: 'v1alpha1',
+                namespace: '',
+                plural: 'qdrantcollections'
+              });
+              log(`Delayed check found ${delayedList.items.length} collection(s)...`);
               for (const collection of delayedList.items) {
                 const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
                 if (collection.metadata.deletionTimestamp) {
@@ -322,10 +289,7 @@ export const onDoneCollection = (err) => {
       return;
     }
     // For other errors, use smaller backoff
-    reconnectAttempts.collection = Math.min(
-      reconnectAttempts.collection + 1,
-      5
-    );
+    reconnectAttempts.collection = Math.min(reconnectAttempts.collection + 1, 5);
     watchRestarts.inc({ resource_type: 'collection', reason: 'error' });
     errorsTotal.inc({ type: 'watch' });
   } else {
@@ -339,9 +303,7 @@ export const onDoneCollection = (err) => {
     const delay = getReconnectDelay(reconnectAttempts.collection);
     setTimeout(async () => {
       try {
-        log(
-          'Listing collections after normal reconnect to catch missed events...'
-        );
+        log('Listing collections after normal reconnect to catch missed events...');
         const collectionList = await k8sCustomApi.listNamespacedCustomObject({
           group: 'qdrant.operator',
           version: 'v1alpha1',
@@ -364,15 +326,11 @@ export const onDoneCollection = (err) => {
             );
             collectionCache.set(resourceKey, collection);
             scheduleReconcile(collection, 'collection');
-            log(
-              `Scheduled reconciliation for collection "${collection.metadata.name}"`
-            );
+            log(`Scheduled reconciliation for collection "${collection.metadata.name}"`);
           }
         }
       } catch (listErr) {
-        log(
-          `Error listing collections after normal reconnect: ${listErr.message}`
-        );
+        log(`Error listing collections after normal reconnect: ${listErr.message}`);
       }
       watchResource();
     }, delay);
@@ -407,22 +365,14 @@ export const watchResource = async () => {
       leaseName === null ||
       leaseName === undefined
     ) {
-      log(
-        '❌ ERROR: POD_NAMESPACE or leaseName is null/undefined, cannot start watch'
-      );
-      log(
-        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-      );
+      log('❌ ERROR: POD_NAMESPACE or leaseName is null/undefined, cannot start watch');
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
       return;
     }
     // Double-check parameters right before API call
     if (!leaseName || !namespace) {
-      log(
-        '❌ ERROR: Parameters became invalid before API call in watchResource()'
-      );
-      log(
-        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-      );
+      log('❌ ERROR: Parameters became invalid before API call in watchResource()');
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
       return;
     }
 
@@ -431,15 +381,8 @@ export const watchResource = async () => {
     const namespaceParam = String(namespace);
 
     // Final validation: ensure they're not empty strings after conversion
-    if (
-      !nameParam ||
-      !namespaceParam ||
-      nameParam === '' ||
-      namespaceParam === ''
-    ) {
-      log(
-        '❌ ERROR: Parameters invalid after string conversion in watchResource()'
-      );
+    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
+      log('❌ ERROR: Parameters invalid after string conversion in watchResource()');
       log(
         `   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`
       );
@@ -464,9 +407,7 @@ export const watchResource = async () => {
       log(
         `⚠️ Client-side validation error in watchResource(): ${errorMsg}. This indicates a programming error.`
       );
-      log(
-        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-      );
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
       log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
       return;
     }
@@ -551,9 +492,7 @@ export const watchResource = async () => {
             namespace: '',
             plural: 'qdrantclusters'
           });
-          log(
-            `Found ${clusterList.items.length} existing cluster(s), processing...`
-          );
+          log(`Found ${clusterList.items.length} existing cluster(s), processing...`);
           for (const cluster of clusterList.items) {
             const resourceKey = `${cluster.metadata.namespace}/${cluster.metadata.name}`;
             // Skip if deletion is in progress
@@ -579,28 +518,20 @@ export const watchResource = async () => {
             namespace: '',
             plural: 'qdrantcollections'
           });
-          log(
-            `Found ${collectionList.items.length} existing collection(s), processing...`
-          );
+          log(`Found ${collectionList.items.length} existing collection(s), processing...`);
           for (const collection of collectionList.items) {
             const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
-            log(
-              `Processing collection "${collection.metadata.name}" from initial list...`
-            );
+            log(`Processing collection "${collection.metadata.name}" from initial list...`);
             // Skip if deletion is in progress
             if (collection.metadata.deletionTimestamp) {
-              log(
-                `Skipping collection "${collection.metadata.name}" - deletion in progress`
-              );
+              log(`Skipping collection "${collection.metadata.name}" - deletion in progress`);
               continue;
             }
             // Update cache
             collectionCache.set(resourceKey, collection);
             // Reconcile to ensure it exists in Qdrant
             scheduleReconcile(collection, 'collection');
-            log(
-              `Scheduled reconciliation for collection "${collection.metadata.name}"`
-            );
+            log(`Scheduled reconciliation for collection "${collection.metadata.name}"`);
           }
         } catch (listErr) {
           log(`Error listing collections on initial watch: ${listErr.message}`);

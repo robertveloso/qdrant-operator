@@ -87,9 +87,7 @@ export const waitForClusterReadiness = (apiObj) => {
         const lastStatus = statefulSetLastReadinessStatus.get(resourceKey);
 
         if (lastStatus !== currentStatus) {
-          log(
-            `Cluster "${name}" readiness: ${available}/${desired} replicas available.`
-          );
+          log(`Cluster "${name}" readiness: ${available}/${desired} replicas available.`);
           statefulSetLastReadinessStatus.set(resourceKey, currentStatus);
         }
       }
@@ -130,12 +128,7 @@ export const waitForClusterReadiness = (apiObj) => {
   };
 
   try {
-    const request = watch.watch(
-      watchPath,
-      {},
-      onEventStatefulSet,
-      onDoneStatefulSet
-    );
+    const request = watch.watch(watchPath, {}, onEventStatefulSet, onDoneStatefulSet);
     statefulSetWatchRequests.set(resourceKey, request);
     log(`Watching StatefulSet "${name}" for readiness.`);
   } catch (err) {
@@ -190,9 +183,7 @@ export const waitForClusterReadiness = (apiObj) => {
             const lastStatus = statefulSetLastReadinessStatus.get(resourceKey);
 
             if (lastStatus !== currentStatus) {
-              log(
-                `Cluster "${name}" readiness: ${available}/${desired} replicas available.`
-              );
+              log(`Cluster "${name}" readiness: ${available}/${desired} replicas available.`);
               statefulSetLastReadinessStatus.set(resourceKey, currentStatus);
             }
           }

@@ -7,7 +7,8 @@
   "scripts": {
     "test": "ava",
     "lint:check": "./node_modules/.bin/prettier --check .",
-    "lint:write": "./node_modules/.bin/prettier --write ."
+    "lint:write": "./node_modules/.bin/prettier --write .",
+    "prepare": "simple-git-hooks"
   },
   "repository": {
     "type": "git",
@@ -33,6 +34,16 @@
   },
   "devDependencies": {
     "ava": "6.4.1",
-    "prettier": "3.7.4"
+    "lint-staged": "15.2.10",
+    "prettier": "3.7.4",
+    "simple-git-hooks": "2.13.1"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged"
+  },
+  "lint-staged": {
+    "*.{js,json,md,yaml,yml}": [
+      "prettier --write"
+    ]
   }
 }

@@ -46,8 +46,7 @@ export const expandPVCIfNeeded = async (apiObj) => {
   }
 
   const desiredSize = apiObj.spec.persistence.size;
-  const storageClassName =
-    apiObj.spec.persistence.storageClassName || 'default';
+  const storageClassName = apiObj.spec.persistence.storageClassName || 'default';
 
   // Check each PVC for the cluster
   for (let i = 0; i < replicas; i++) {
@@ -65,9 +64,7 @@ export const expandPVCIfNeeded = async (apiObj) => {
       }
 
       if (needsExpansion(currentSize, desiredSize)) {
-        log(
-          `📈 Expanding PVC "${pvcName}" from ${currentSize} to ${desiredSize}...`
-        );
+        log(`📈 Expanding PVC "${pvcName}" from ${currentSize} to ${desiredSize}...`);
 
         // Patch PVC to increase size
         const patch = [
@@ -91,16 +88,11 @@ export const expandPVCIfNeeded = async (apiObj) => {
           }
         );
 
-        log(
-          `✅ PVC "${pvcName}" expansion requested (${currentSize} -> ${desiredSize})`
-        );
+        log(`✅ PVC "${pvcName}" expansion requested (${currentSize} -> ${desiredSize})`);
         log(
           `ℹ️ Note: PVC expansion may take time depending on storage provider. Pods may need to be restarted.`
         );
-      } else if (
-        currentSize !== desiredSize &&
-        !needsExpansion(desiredSize, currentSize)
-      ) {
+      } else if (currentSize !== desiredSize && !needsExpansion(desiredSize, currentSize)) {
         // Size decreased - log warning (Kubernetes doesn't support shrinking)
         log(
           `⚠️ PVC "${pvcName}" size decrease requested (${currentSize} -> ${desiredSize}), but PVCs cannot be shrunk. Current size will be maintained.`
@@ -109,9 +101,7 @@ export const expandPVCIfNeeded = async (apiObj) => {
     } catch (err) {
       if (err.statusCode === 404) {
         // PVC doesn't exist yet - will be created with correct size
-        log(
-          `ℹ️ PVC "${pvcName}" doesn't exist yet, will be created with size ${desiredSize}`
-        );
+        log(`ℹ️ PVC "${pvcName}" doesn't exist yet, will be created with size ${desiredSize}`);
       } else {
         log(`⚠️ Error checking/expanding PVC "${pvcName}": ${err.message}`);
       }
@@ -228,9 +218,7 @@ export const createClusterVolumeSnapshot = async (
   const replicas = apiObj.spec.replicas || 1;
 
   if (!apiObj.spec.persistence) {
-    log(
-      `⚠️ Cluster "${clusterName}" has no persistence configured, cannot create VolumeSnapshot`
-    );
+    log(`⚠️ Cluster "${clusterName}" has no persistence configured, cannot create VolumeSnapshot`);
     return null;
   }
 
@@ -276,9 +264,7 @@ export const createClusterVolumeSnapshot = async (
     return null;
   }
 
-  log(
-    `✅ Created ${snapshots.length} VolumeSnapshot(s) for cluster "${clusterName}"`
-  );
+  log(`✅ Created ${snapshots.length} VolumeSnapshot(s) for cluster "${clusterName}"`);
   return snapshots;
 };
 
@@ -323,9 +309,7 @@ export const restorePVCFromSnapshot = async (
     }
 
     if (pvcExists) {
-      log(
-        `⚠️ PVC "${pvcName}" already exists. Restore requires deleting existing PVC first.`
-      );
+      log(`⚠️ PVC "${pvcName}" already exists. Restore requires deleting existing PVC first.`);
       return false;
     }
 
@@ -368,9 +352,7 @@ export const restorePVCFromSnapshot = async (
     return true;
   } catch (err) {
     if (err.statusCode === 404 || err.message?.includes('not found')) {
-      log(
-        `⚠️ VolumeSnapshot API not available or snapshot not found: ${err.message}`
-      );
+      log(`⚠️ VolumeSnapshot API not available or snapshot not found: ${err.message}`);
       return false;
     }
     log(`❌ Error restoring PVC from snapshot: ${err.message}`);
@@ -413,11 +395,7 @@ export const listClusterVolumeSnapshots = async (clusterName, namespace) => {
 };
 
 // Delete old snapshots based on retention policy
-export const cleanupOldSnapshots = async (
-  clusterName,
-  namespace,
-  retentionCount
-) => {
+export const cleanupOldSnapshots = async (clusterName, namespace, retentionCount) => {
   const snapshots = await listClusterVolumeSnapshots(clusterName, namespace);
 
   if (snapshots.length <= retentionCount) {
@@ -433,10 +411,7 @@ export const cleanupOldSnapshots = async (
       return timeA - timeB;
     });
 
-  const toDelete = sortedSnapshots.slice(
-    0,
-    sortedSnapshots.length - retentionCount
-  );
+  const toDelete = sortedSnapshots.slice(0, sortedSnapshots.length - retentionCount);
 
   for (const snapshot of toDelete) {
     try {
@@ -447,9 +422,7 @@ export const cleanupOldSnapshots = async (
         'volumesnapshots',
         snapshot.name
       );
-      log(
-        `🗑️ Deleted old VolumeSnapshot "${snapshot.name}" (retention policy)`
-      );
+      log(`🗑️ Deleted old VolumeSnapshot "${snapshot.name}" (retention policy)`);
     } catch (err) {
       log(`⚠️ Error deleting snapshot "${snapshot.name}": ${err.message}`);
     }
@@ -470,9 +443,7 @@ export const applyVolumeSnapshotCronJob = async (apiObj) => {
         name: `${name}-volumesnapshot`,
         namespace: namespace
       });
-      log(
-        `🗑️ Deleted VolumeSnapshot CronJob "${name}-volumesnapshot" (schedule removed)`
-      );
+      log(`🗑️ Deleted VolumeSnapshot CronJob "${name}-volumesnapshot" (schedule removed)`);
     } catch (err) {
       // CronJob doesn't exist, ignore
     }
@@ -516,9 +487,7 @@ export const applyVolumeSnapshotCronJob = async (apiObj) => {
         namespace: namespace,
         body: cronJobTemplate
       });
-      log(
-        `✅ VolumeSnapshot CronJob "${name}-volumesnapshot" created (schedule: ${schedule})`
-      );
+      log(`✅ VolumeSnapshot CronJob "${name}-volumesnapshot" created (schedule: ${schedule})`);
     } else {
       log(`⚠️ Error managing VolumeSnapshot CronJob: ${err.message}`);
     }

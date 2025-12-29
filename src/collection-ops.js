@@ -2,11 +2,7 @@ import { log } from './utils.js';
 import { genericTemplate } from './cluster-template.js';
 
 // prepare connection params
-export const getConnectionParameters = async (
-  apiObj,
-  k8sCustomApi,
-  k8sCoreApi
-) => {
+export const getConnectionParameters = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const clusterName = apiObj.spec.cluster;
@@ -66,9 +62,7 @@ const getJobParameters = async (apiObj, k8sCustomApi) => {
   if (typeof resCurrent.spec.tls == 'undefined') {
     parameters.connectionMethod = 'http';
   } else {
-    parameters.connectionMethod = resCurrent.spec.tls.enabled
-      ? 'https'
-      : 'http';
+    parameters.connectionMethod = resCurrent.spec.tls.enabled ? 'https' : 'http';
   }
   parameters.apikeyEnabled = resCurrent.spec.apikey !== 'false';
   parameters.replicas = resCurrent.spec.replicas;
@@ -103,9 +97,7 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
         namespace: namespace,
         body: newBackupJobTemplate
       });
-      log(
-        `Backup Job "${newBackupJobTemplate.metadata.name}" was successfully started!`
-      );
+      log(`Backup Job "${newBackupJobTemplate.metadata.name}" was successfully started!`);
     } catch (err) {
       log(err);
     }
@@ -126,9 +118,7 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
         namespace: namespace,
         body: newRestoreJobTemplate
       });
-      log(
-        `Restore Job "${newRestoreJobTemplate.metadata.name}" was successfully started!`
-      );
+      log(`Restore Job "${newRestoreJobTemplate.metadata.name}" was successfully started!`);
     } catch (err) {
       log(err);
     }
@@ -175,15 +165,9 @@ export const applyJobs = async (apiObj, k8sCustomApi, k8sBatchApi) => {
 
 export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
-  log(
-    `🎯 createCollection called for "${name}" in cluster "${apiObj.spec.cluster}"`
-  );
+  log(`🎯 createCollection called for "${name}" in cluster "${apiObj.spec.cluster}"`);
   try {
-    const parameters = await getConnectionParameters(
-      apiObj,
-      k8sCustomApi,
-      k8sCoreApi
-    );
+    const parameters = await getConnectionParameters(apiObj, k8sCustomApi, k8sCoreApi);
     // prepare payload
     var body = {
       vectors: {
@@ -198,9 +182,7 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     if (typeof apiObj.spec.config !== 'undefined') {
       body = { ...body, ...apiObj.spec.config };
     }
-    log(
-      `Trying to create a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`
-    );
+    log(`Trying to create a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`);
     log(`   URL: ${parameters.url}`);
     log(`   Body: ${JSON.stringify(body)}`);
     // PUT request to Qdrant API with timeout
@@ -223,18 +205,12 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
         throw new Error(
           `Request timeout: Failed to create collection "${name}" - Qdrant API did not respond within 30 seconds`
         );
-      } else if (
-        fetchErr.code === 'ECONNREFUSED' ||
-        fetchErr.message.includes('ECONNREFUSED')
-      ) {
+      } else if (fetchErr.code === 'ECONNREFUSED' || fetchErr.message.includes('ECONNREFUSED')) {
         log(`❌ Connection refused to Qdrant API at ${parameters.url}`);
         throw new Error(
           `Connection refused: Cannot connect to Qdrant cluster "${apiObj.spec.cluster}". Is the cluster running?`
         );
-      } else if (
-        fetchErr.code === 'ENOTFOUND' ||
-        fetchErr.message.includes('ENOTFOUND')
-      ) {
+      } else if (fetchErr.code === 'ENOTFOUND' || fetchErr.message.includes('ENOTFOUND')) {
         log(`❌ DNS resolution failed for Qdrant API at ${parameters.url}`);
         throw new Error(
           `DNS resolution failed: Cannot resolve hostname for cluster "${apiObj.spec.cluster}"`
@@ -257,25 +233,16 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     } catch (parseErr) {
       log(`❌ Failed to parse response from Qdrant API: ${parseErr.message}`);
       log(`   Response status: ${resp.status} ${resp.statusText}`);
-      log(
-        `   Response headers: ${JSON.stringify(Object.fromEntries(resp.headers.entries()))}`
-      );
-      throw new Error(
-        `Invalid JSON response from Qdrant API: ${parseErr.message}`
-      );
+      log(`   Response headers: ${JSON.stringify(Object.fromEntries(resp.headers.entries()))}`);
+      throw new Error(`Invalid JSON response from Qdrant API: ${parseErr.message}`);
     }
 
-    log(
-      `Response status: "${JSON.stringify(data.status)}", time: "${data.time}".`
-    );
+    log(`Response status: "${JSON.stringify(data.status)}", time: "${data.time}".`);
 
     // Check HTTP status code first
     if (!resp.ok) {
-      const errorMsg =
-        data.status?.error || `HTTP ${resp.status}: ${resp.statusText}`;
-      log(
-        `❌ Collection creation failed with HTTP ${resp.status}: ${JSON.stringify(errorMsg)}`
-      );
+      const errorMsg = data.status?.error || `HTTP ${resp.status}: ${resp.statusText}`;
+      log(`❌ Collection creation failed with HTTP ${resp.status}: ${JSON.stringify(errorMsg)}`);
       throw new Error(`Failed to create collection: ${errorMsg}`);
     }
 
@@ -290,15 +257,9 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     // Verify success - Qdrant returns status: "ok" on success
     if (data.status === 'ok') {
       log(`✅ Collection "${name}" created successfully`);
-    } else if (
-      data.status &&
-      typeof data.status === 'object' &&
-      !data.status.error
-    ) {
+    } else if (data.status && typeof data.status === 'object' && !data.status.error) {
       // Some Qdrant versions might return different success format
-      log(
-        `✅ Collection "${name}" created successfully (status: ${JSON.stringify(data.status)})`
-      );
+      log(`✅ Collection "${name}" created successfully (status: ${JSON.stringify(data.status)})`);
     } else {
       // Unexpected response format - log warning but don't fail
       // This handles edge cases where Qdrant might return different formats
@@ -317,11 +278,7 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
 
 export const updateCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
-  const parameters = await getConnectionParameters(
-    apiObj,
-    k8sCustomApi,
-    k8sCoreApi
-  );
+  const parameters = await getConnectionParameters(apiObj, k8sCustomApi, k8sCoreApi);
   // prepare payload
   var body = {
     vectors: {
@@ -339,9 +296,7 @@ export const updateCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     body = { ...body, ...apiObj.spec.config };
   }
   try {
-    log(
-      `Trying to update a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`
-    );
+    log(`Trying to update a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`);
     // PATCH request to Qdrant API
     const resp = await fetch(parameters.url, {
       method: 'PATCH',
@@ -357,15 +312,9 @@ export const updateCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
 
 export const deleteCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
   const name = apiObj.metadata.name;
-  const parameters = await getConnectionParameters(
-    apiObj,
-    k8sCustomApi,
-    k8sCoreApi
-  );
+  const parameters = await getConnectionParameters(apiObj, k8sCustomApi, k8sCoreApi);
   try {
-    log(
-      `Trying to delete a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`
-    );
+    log(`Trying to delete a Collection "${name}" in the Cluster "${apiObj.spec.cluster}"...`);
     // DELETE request to qdrant API
     const resp = await fetch(parameters.url, {
       method: 'DELETE',

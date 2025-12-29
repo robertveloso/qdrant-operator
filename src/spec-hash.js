@@ -64,12 +64,8 @@ export const updateLastAppliedHash = async (apiObj, hash) => {
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     } catch (err) {
-      const errorCode =
-        err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
-      if (
-        errorCode === 409 ||
-        (err.message && err.message.includes('Conflict'))
-      ) {
+      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+      if (errorCode === 409 || (err.message && err.message.includes('Conflict'))) {
         retries++;
         if (retries < maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));

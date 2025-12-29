@@ -17,9 +17,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
     );
   }
   if (name === '' || namespace === '') {
-    throw new Error(
-      `Parameters cannot be empty: name="${name}", namespace="${namespace}"`
-    );
+    throw new Error(`Parameters cannot be empty: name="${name}", namespace="${namespace}"`);
   }
 
   // Ensure parameters are explicitly strings (defensive programming)
@@ -45,9 +43,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
     log(
       `safeReadNamespacedLease: About to call API with name="${nameStr}", namespace="${namespaceStr}"`
     );
-    log(
-      `   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`
-    );
+    log(`   typeof nameStr: ${typeof nameStr}, typeof namespaceStr: ${typeof namespaceStr}`);
     log(
       `   nameStr === null: ${nameStr === null}, nameStr === undefined: ${nameStr === undefined}`
     );
@@ -88,10 +84,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
       errorMsg.includes('not found') ||
       errorMsg.includes('NotFound');
 
-    if (
-      errorMsg.includes('Required parameter') ||
-      errorMsg.includes('was null or undefined')
-    ) {
+    if (errorMsg.includes('Required parameter') || errorMsg.includes('was null or undefined')) {
       // Log detailed error information if in debug mode
       if (process.env.DEBUG_MODE === 'true') {
         log(`Error with object format, trying positional: ${errorMsg}`);
@@ -115,9 +108,7 @@ const safeReadNamespacedLease = async (name, namespace) => {
     // Log detailed error information for other errors (only in debug mode)
     if (process.env.DEBUG_MODE === 'true') {
       log(`Error in safeReadNamespacedLease: ${errorMsg}`);
-      log(
-        `   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`
-      );
+      log(`   Called with nameStr="${nameStr}", namespaceStr="${namespaceStr}"`);
       log(`   Error stack: ${err.stack || 'No stack trace'}`);
     }
     throw err;
@@ -138,13 +129,9 @@ export const ensureLeaseExists = async () => {
   // Check for empty string, null, undefined, or whitespace-only
   if (!namespace || namespace === '' || !leaseName || leaseName === '') {
     log('⚠️ POD_NAMESPACE or leaseName not set, cannot ensure lease exists');
-    log(
-      `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-    );
+    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
     log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
-    log(
-      `   typeof namespace: ${typeof namespace}, typeof leaseName: ${typeof leaseName}`
-    );
+    log(`   typeof namespace: ${typeof namespace}, typeof leaseName: ${typeof leaseName}`);
     return;
   }
 
@@ -155,21 +142,15 @@ export const ensureLeaseExists = async () => {
     leaseName === null ||
     leaseName === undefined
   ) {
-    log(
-      '⚠️ POD_NAMESPACE or leaseName is null/undefined, cannot ensure lease exists'
-    );
-    log(
-      `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-    );
+    log('⚠️ POD_NAMESPACE or leaseName is null/undefined, cannot ensure lease exists');
+    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
     log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
     return;
   }
 
   // Log parameters for debugging (only in debug mode)
   if (process.env.DEBUG_MODE === 'true') {
-    log(
-      `ensureLeaseExists: namespace="${namespace}", leaseName="${leaseName}"`
-    );
+    log(`ensureLeaseExists: namespace="${namespace}", leaseName="${leaseName}"`);
   }
 
   try {
@@ -177,9 +158,7 @@ export const ensureLeaseExists = async () => {
     // Double-check parameters right before API call
     if (!leaseName || !namespace) {
       log('⚠️ Parameters became invalid before API call');
-      log(
-        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-      );
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
       return;
     }
 
@@ -188,12 +167,7 @@ export const ensureLeaseExists = async () => {
     const namespaceParam = String(namespace);
 
     // Final validation: ensure they're not empty strings after conversion
-    if (
-      !nameParam ||
-      !namespaceParam ||
-      nameParam === '' ||
-      namespaceParam === ''
-    ) {
+    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
       log('⚠️ Parameters invalid after string conversion');
       log(
         `   nameParam: ${JSON.stringify(nameParam)}, namespaceParam: ${JSON.stringify(namespaceParam)}`
@@ -250,12 +224,8 @@ export const ensureLeaseExists = async () => {
         errorMsg.includes('was null') ||
         errorMsg.includes('was undefined'))
     ) {
-      log(
-        `⚠️ Client-side validation error: ${errorMsg}. This indicates a programming error.`
-      );
-      log(
-        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-      );
+      log(`⚠️ Client-side validation error: ${errorMsg}. This indicates a programming error.`);
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
       log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
       // Don't try to create lease if we can't even validate parameters
       return;
@@ -322,12 +292,7 @@ export const ensureLeaseExists = async () => {
             const namespaceParam = String(namespace);
 
             // Final validation: ensure they're not empty strings after conversion
-            if (
-              !nameParam ||
-              !namespaceParam ||
-              nameParam === '' ||
-              namespaceParam === ''
-            ) {
+            if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
               log('⚠️ Parameters invalid after string conversion during retry');
               break;
             }
@@ -370,9 +335,7 @@ export const ensureLeaseExists = async () => {
           createErrorMsg.includes('already exists') ||
           createErrorMsg.includes('AlreadyExists')
         ) {
-          log(
-            '✅ Lease was created by another pod (expected in multi-replica setup)'
-          );
+          log('✅ Lease was created by another pod (expected in multi-replica setup)');
         } else {
           log(`⚠️ Failed to create lease: ${createErrorMsg}`);
           log(`   Error code: ${createErrorCode}`);
@@ -413,9 +376,7 @@ export const isLeader = async () => {
     leaseName === undefined
   ) {
     log('⚠️ POD_NAMESPACE or leaseName is null/undefined in isLeader()');
-    log(
-      `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-    );
+    log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
     log(`   POD_NAMESPACE env: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
     leaderElection.set(0);
     return;
@@ -434,12 +395,7 @@ export const isLeader = async () => {
     const namespaceParam = String(namespace);
 
     // Final validation: ensure they're not empty strings after conversion
-    if (
-      !nameParam ||
-      !namespaceParam ||
-      nameParam === '' ||
-      namespaceParam === ''
-    ) {
+    if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
       log('⚠️ Parameters invalid after string conversion in isLeader()');
       leaderElection.set(0);
       return;
@@ -521,9 +477,7 @@ export const isLeader = async () => {
       log(
         `⚠️ Client-side validation error in isLeader(): ${errorMsg}. This indicates a programming error.`
       );
-      log(
-        `   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`
-      );
+      log(`   namespace: ${JSON.stringify(namespace)}, leaseName: ${JSON.stringify(leaseName)}`);
       log(`   POD_NAMESPACE: ${JSON.stringify(process.env.POD_NAMESPACE)}`);
       leaderElection.set(0);
       return;
@@ -558,9 +512,7 @@ export const initializeLeaderElection = async () => {
 // Acquire leader lock
 export const acquireLeaderLock = async () => {
   // leader election using k8s leases
-  log(
-    `Status of "${process.env.POD_NAME}": FOLLOWER. Trying to get leader status...`
-  );
+  log(`Status of "${process.env.POD_NAME}": FOLLOWER. Trying to get leader status...`);
   log(`   Namespace: ${process.env.POD_NAMESPACE}`);
 
   // Start periodic logging for followers while waiting
@@ -596,12 +548,7 @@ export const acquireLeaderLock = async () => {
       const namespaceParam = String(namespace);
 
       // Final validation: ensure they're not empty strings after conversion
-      if (
-        !nameParam ||
-        !namespaceParam ||
-        nameParam === '' ||
-        namespaceParam === ''
-      ) {
+      if (!nameParam || !namespaceParam || nameParam === '' || namespaceParam === '') {
         return; // Silently skip if params invalid after conversion
       }
 
@@ -628,9 +575,7 @@ export const acquireLeaderLock = async () => {
   }, 10000); // Log every 10 seconds
 
   try {
-    log(
-      `Attempting to acquire leader lock in namespace: ${process.env.POD_NAMESPACE}`
-    );
+    log(`Attempting to acquire leader lock in namespace: ${process.env.POD_NAMESPACE}`);
     // Small delay to ensure namespace is fully available
     await new Promise((resolve) => setTimeout(resolve, 1000));
     // startLocking() with waitUntilLock: true will block until lock is acquired
@@ -643,8 +588,7 @@ export const acquireLeaderLock = async () => {
     log(`⚠️ Failed to acquire leader lock: ${errorMsg}`);
     if (errorBody) {
       try {
-        const errorJson =
-          typeof errorBody === 'string' ? JSON.parse(errorBody) : errorBody;
+        const errorJson = typeof errorBody === 'string' ? JSON.parse(errorBody) : errorBody;
         log(`   Error details: ${JSON.stringify(errorJson)}`);
       } catch (e) {
         log(`   Error body: ${errorBody}`);
@@ -653,9 +597,7 @@ export const acquireLeaderLock = async () => {
     log(`   POD_NAMESPACE: ${process.env.POD_NAMESPACE || 'UNDEFINED'}`);
     log(`   POD_NAME: ${process.env.POD_NAME || 'UNDEFINED'}`);
     log(`   This may be a transient error. K8SLock should retry internally.`);
-    log(
-      `   If this persists, check lease permissions and API server connectivity.`
-    );
+    log(`   If this persists, check lease permissions and API server connectivity.`);
     // Don't re-throw - K8SLock with waitUntilLock: true handles retries
     // Re-throwing would create competing retry loops
     // Let K8SLock handle retries internally

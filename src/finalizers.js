@@ -78,9 +78,7 @@ export const removeFinalizer = async (apiObj, resourceType) => {
     );
     log(`Removed finalizer from ${resourceType} "${name}"`);
   } catch (err) {
-    log(
-      `Error removing finalizer from ${resourceType} "${name}": ${err.message}`
-    );
+    log(`Error removing finalizer from ${resourceType} "${name}": ${err.message}`);
     errorsTotal.inc({ type: 'finalizer_remove' });
   }
 };

@@ -503,10 +503,7 @@ test('Complete cluster template', (t) => {
 });
 
 test('Complete cluster apikey secret template', (t) => {
-  const actual = clusterSecretTemplate(
-    clusterCompletePayload,
-    clusterCompletePayload.spec.apikey
-  );
+  const actual = clusterSecretTemplate(clusterCompletePayload, clusterCompletePayload.spec.apikey);
   t.deepEqual(
     actual,
     expectedCompleteSecretTemplate,
@@ -515,10 +512,7 @@ test('Complete cluster apikey secret template', (t) => {
 });
 
 test('Complete cluster headless service template', (t) => {
-  const actual = genericTemplate(
-    clusterCompletePayload,
-    'service-headless.jsr'
-  );
+  const actual = genericTemplate(clusterCompletePayload, 'service-headless.jsr');
   t.deepEqual(
     actual,
     expectedCompleteServiceTemplate,
@@ -527,11 +521,7 @@ test('Complete cluster headless service template', (t) => {
 });
 
 test('Cluster auth secret template without read-only apikey', (t) => {
-  const actual = clusterAuthSecretTemplate(
-    clusterCompletePayload,
-    'testkey',
-    'false'
-  );
+  const actual = clusterAuthSecretTemplate(clusterCompletePayload, 'testkey', 'false');
   t.is(actual.kind, 'Secret');
   t.is(actual.metadata.name, 'my-cluster-auth-config');
   t.truthy(actual.data['local.yaml']);
@@ -542,11 +532,7 @@ test('Cluster auth secret template without read-only apikey', (t) => {
 });
 
 test('Cluster auth secret template with read-only apikey', (t) => {
-  const actual = clusterAuthSecretTemplate(
-    clusterCompletePayload,
-    'testkey',
-    'readonlykey'
-  );
+  const actual = clusterAuthSecretTemplate(clusterCompletePayload, 'testkey', 'readonlykey');
   t.is(actual.kind, 'Secret');
   t.is(actual.metadata.name, 'my-cluster-auth-config');
   t.truthy(actual.data['local.yaml']);
@@ -557,10 +543,7 @@ test('Cluster auth secret template with read-only apikey', (t) => {
 });
 
 test('Cluster read-only secret template', (t) => {
-  const actual = clusterReadSecretTemplate(
-    clusterCompletePayload,
-    'readonlykey'
-  );
+  const actual = clusterReadSecretTemplate(clusterCompletePayload, 'readonlykey');
   t.is(actual.kind, 'Secret');
   t.is(actual.metadata.name, 'my-cluster-read-apikey');
   t.is(actual.data['api-key'], btoa('readonlykey'));
@@ -585,10 +568,7 @@ test('Cluster configmap template without config', (t) => {
 });
 
 test('NetworkPolicy template', (t) => {
-  const actual = genericTemplate(
-    clusterCompletePayload,
-    'networkpolicy.jsr'
-  );
+  const actual = genericTemplate(clusterCompletePayload, 'networkpolicy.jsr');
   t.is(actual.kind, 'NetworkPolicy');
   t.is(actual.metadata.name, 'my-cluster');
   t.deepEqual(actual.spec.podSelector.matchLabels, {

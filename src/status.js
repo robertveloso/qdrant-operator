@@ -3,12 +3,7 @@ import { settingStatus, pendingEvents } from './state.js';
 import { log } from './utils.js';
 
 // Set cleanup status with phase and attempt count (for retry tracking)
-export const setCleanupStatus = async (
-  apiObj,
-  phase,
-  attempt = null,
-  error = null
-) => {
+export const setCleanupStatus = async (apiObj, phase, attempt = null, error = null) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
@@ -68,9 +63,7 @@ export const setCleanupStatus = async (
             try {
               await onEventCluster(event.phase, event.apiObj);
             } catch (err) {
-              log(
-                `Error processing pending cleanup event for "${name}": ${err.message}`
-              );
+              log(`Error processing pending cleanup event for "${name}": ${err.message}`);
             }
           }, 100);
         }
@@ -78,12 +71,8 @@ export const setCleanupStatus = async (
 
       return;
     } catch (err) {
-      const errorCode =
-        err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
-      if (
-        errorCode === 409 ||
-        (err.message && err.message.includes('Conflict'))
-      ) {
+      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+      if (errorCode === 409 || (err.message && err.message.includes('Conflict'))) {
         retries++;
         if (retries < maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));
@@ -115,8 +104,7 @@ export const setStatusWithPhase = async (
 
   while (retries < maxRetries) {
     try {
-      const plural =
-        resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
+      const plural = resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
       const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
         group: 'qdrant.operator',
         version: 'v1alpha1',
@@ -164,9 +152,7 @@ export const setStatusWithPhase = async (
             try {
               await onEventCluster(event.phase, event.apiObj);
             } catch (err) {
-              log(
-                `Error processing pending event for "${name}": ${err.message}`
-              );
+              log(`Error processing pending event for "${name}": ${err.message}`);
             }
           }, 100);
         }
@@ -174,23 +160,15 @@ export const setStatusWithPhase = async (
 
       return;
     } catch (err) {
-      const errorCode =
-        err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
-      if (
-        errorCode === 409 ||
-        (err.message && err.message.includes('Conflict'))
-      ) {
+      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+      if (errorCode === 409 || (err.message && err.message.includes('Conflict'))) {
         retries++;
         if (retries < maxRetries) {
-          log(
-            `Status update conflict for "${name}", retrying (${retries}/${maxRetries})...`
-          );
+          log(`Status update conflict for "${name}", retrying (${retries}/${maxRetries})...`);
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));
           continue;
         } else {
-          log(
-            `Failed to update status for "${name}" after ${maxRetries} retries: ${err.message}`
-          );
+          log(`Failed to update status for "${name}" after ${maxRetries} retries: ${err.message}`);
         }
       } else {
         log(`Error updating status for "${name}": ${err.message}`);
@@ -237,11 +215,7 @@ export const setStatus = async (apiObj, status) => {
 };
 
 // Set error status with message (for invalid spec or other errors)
-export const setErrorStatus = async (
-  apiObj,
-  errorMessage,
-  resourceType = 'cluster'
-) => {
+export const setErrorStatus = async (apiObj, errorMessage, resourceType = 'cluster') => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
@@ -252,8 +226,7 @@ export const setErrorStatus = async (
 
   while (retries < maxRetries) {
     try {
-      const plural =
-        resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
+      const plural = resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
       const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
         group: 'qdrant.operator',
         version: 'v1alpha1',
@@ -288,12 +261,8 @@ export const setErrorStatus = async (
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     } catch (err) {
-      const errorCode =
-        err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
-      if (
-        errorCode === 409 ||
-        (err.message && err.message.includes('Conflict'))
-      ) {
+      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+      if (errorCode === 409 || (err.message && err.message.includes('Conflict'))) {
         retries++;
         if (retries < maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));
@@ -324,8 +293,5 @@ export const updateResourceVersion = async (apiObj) => {
   const resCurrent = res;
   // Import dynamically to avoid circular dependency
   const { lastClusterResourceVersion } = await import('./state.js');
-  lastClusterResourceVersion.set(
-    resourceKey,
-    resCurrent.metadata.resourceVersion
-  );
+  lastClusterResourceVersion.set(resourceKey, resCurrent.metadata.resourceVersion);
 };

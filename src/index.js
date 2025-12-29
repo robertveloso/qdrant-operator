@@ -1,11 +1,6 @@
 import { k8sCustomApi } from './k8s-client.js';
 import { applyQueue, clusterCache, collectionCache } from './state.js';
-import {
-  initializeLeaderElection,
-  acquireLeaderLock,
-  isLeader,
-  lock
-} from './leader-election.js';
+import { initializeLeaderElection, acquireLeaderLock, isLeader, lock } from './leader-election.js';
 import { watchResource, abortAllWatches } from './watch.js';
 import { scheduleReconcile } from './reconciliation.js';
 import {
@@ -123,9 +118,7 @@ const main = async () => {
       collectionsManaged.set(collections.length);
 
       // Periodic reconciliation for collections
-      log(
-        `🔄 Periodic reconciliation: Found ${collections.length} collection(s) to reconcile...`
-      );
+      log(`🔄 Periodic reconciliation: Found ${collections.length} collection(s) to reconcile...`);
       for (const collection of collections) {
         const resourceKey = `${collection.metadata.namespace}/${collection.metadata.name}`;
         // Skip if deletion is in progress

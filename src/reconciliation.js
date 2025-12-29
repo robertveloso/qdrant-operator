@@ -1,10 +1,4 @@
-import {
-  k8sAppsApi,
-  k8sCoreApi,
-  k8sCustomApi,
-  k8sPolicyApi,
-  k8sBatchApi
-} from './k8s-client.js';
+import { k8sAppsApi, k8sCoreApi, k8sCustomApi, k8sPolicyApi, k8sBatchApi } from './k8s-client.js';
 import {
   applyQueue,
   statefulSetCache,
@@ -32,11 +26,7 @@ import {
 import { setStatus, updateResourceVersion, setErrorStatus } from './status.js';
 import { calculateSpecHash, updateLastAppliedHash } from './spec-hash.js';
 import { waitForClusterReadiness } from './readiness.js';
-import {
-  errorsTotal,
-  driftDetectedTotal,
-  reconcileQueueDepth
-} from './metrics.js';
+import { errorsTotal, driftDetectedTotal, reconcileQueueDepth } from './metrics.js';
 import { log } from './utils.js';
 
 // Schedule retry with persistent queue (survives reconnections)
@@ -95,9 +85,7 @@ export const scheduleReconcile = (apiObj, resourceType) => {
   const timeout = setTimeout(async () => {
     // Check again before starting reconcile (may have started shutting down during debounce)
     if (shuttingDown.value) {
-      log(
-        `Skipping reconcile for "${resourceKey}" - operator is shutting down`
-      );
+      log(`Skipping reconcile for "${resourceKey}" - operator is shutting down`);
       applyQueue.delete(resourceKey);
       reconcileQueueDepth.set(applyQueue.size);
       return;
@@ -125,9 +113,7 @@ export const scheduleReconcile = (apiObj, resourceType) => {
       }
       log(`✅ Completed reconciliation for ${resourceType} "${name}"`);
     } catch (err) {
-      log(
-        `❌ Error in reconciliation for ${resourceType} "${name}": ${err.message}`
-      );
+      log(`❌ Error in reconciliation for ${resourceType} "${name}": ${err.message}`);
       if (err.stack) {
         log(`   Stack: ${err.stack}`);
       }
@@ -174,10 +160,7 @@ const validateCollectionSpec = (spec) => {
   if (typeof spec.shardNumber !== 'undefined' && spec.shardNumber < 1) {
     return `Invalid shardNumber: ${spec.shardNumber}. Must be >= 1`;
   }
-  if (
-    typeof spec.replicationFactor !== 'undefined' &&
-    spec.replicationFactor < 1
-  ) {
+  if (typeof spec.replicationFactor !== 'undefined' && spec.replicationFactor < 1) {
     return `Invalid replicationFactor: ${spec.replicationFactor}. Must be >= 1`;
   }
   return null; // Valid
@@ -281,9 +264,7 @@ export const reconcileCluster = async (apiObj) => {
   // Fast path: if hash matches, spec hasn't changed - skip expensive diff
   let needsStatefulSetReconcile = false;
   if (lastAppliedHash && lastAppliedHash === desiredHash) {
-    log(
-      `Spec hash unchanged for "${name}" (${desiredHash}), skipping StatefulSet reconciliation`
-    );
+    log(`Spec hash unchanged for "${name}" (${desiredHash}), skipping StatefulSet reconciliation`);
     needsStatefulSetReconcile = false;
   } else {
     // Hash differs or not set - always reapply StatefulSet
@@ -298,9 +279,7 @@ export const reconcileCluster = async (apiObj) => {
       // Increment drift detection metric
       driftDetectedTotal.inc({ resource_type: 'cluster' });
     } else {
-      log(
-        `No previous hash found for "${name}", initial reconciliation with hash ${desiredHash}`
-      );
+      log(`No previous hash found for "${name}", initial reconciliation with hash ${desiredHash}`);
       // Don't count initial reconciliation as drift
     }
   }
@@ -316,11 +295,8 @@ export const reconcileCluster = async (apiObj) => {
   await applyNetworkPolicyCluster(apiObj, k8sNetworkingApi);
 
   // Check and expand PVCs if size increased (automatic volume expansion)
-  const {
-    expandPVCIfNeeded,
-    createClusterVolumeSnapshot,
-    cleanupOldSnapshots
-  } = await import('./pvc-ops.js');
+  const { expandPVCIfNeeded, createClusterVolumeSnapshot, cleanupOldSnapshots } =
+    await import('./pvc-ops.js');
   await expandPVCIfNeeded(apiObj);
 
   // Handle VolumeSnapshots if configured
@@ -332,16 +308,10 @@ export const reconcileCluster = async (apiObj) => {
     // Create snapshot if requested (one-time trigger)
     if (apiObj.spec.volumeSnapshots.createNow) {
       const snapshotName = `${name}-snapshot-${Date.now()}`;
-      await createClusterVolumeSnapshot(
-        apiObj,
-        snapshotName,
-        snapshotClassName
-      );
+      await createClusterVolumeSnapshot(apiObj, snapshotName, snapshotClassName);
 
       // Reset createNow flag (would need to patch CR, but for now just log)
-      log(
-        `ℹ️ VolumeSnapshot created. Consider removing createNow flag from spec.`
-      );
+      log(`ℹ️ VolumeSnapshot created. Consider removing createNow flag from spec.`);
     }
 
     // Create/update CronJob for scheduled snapshots
@@ -531,9 +501,7 @@ export const reconcileCollection = async (apiObj) => {
           `🔍 Debug: Cluster "${clusterName}" exists but status check failed. Cluster spec: replicas=${clusterObj.spec?.replicas || 'undefined'}, image=${clusterObj.spec?.image || 'undefined'}`
         );
       } catch (debugErr) {
-        log(
-          `🔍 Debug: Could not fetch cluster object for debugging: ${debugErr.message}`
-        );
+        log(`🔍 Debug: Could not fetch cluster object for debugging: ${debugErr.message}`);
       }
       // Cluster might not exist yet or API error - schedule retry
       scheduleRetry(currentCollection, 'collection', 5000, 0);
@@ -555,11 +523,7 @@ export const reconcileCollection = async (apiObj) => {
           sts.status?.availableReplicas >= sts.spec?.replicas &&
           sts.status?.updatedReplicas >= sts.spec?.replicas;
 
-        if (
-          stsReady &&
-          clusterStatus !== 'Running' &&
-          clusterStatus !== 'Healthy'
-        ) {
+        if (stsReady && clusterStatus !== 'Running' && clusterStatus !== 'Healthy') {
           log(
             `⚠️ Cluster status is "${clusterStatus}" but StatefulSet is ready. Proceeding with collection creation (status may be stale)...`
           );
@@ -605,9 +569,7 @@ export const reconcileCollection = async (apiObj) => {
               );
               for (const pod of podsRes.items) {
                 const podStatus = pod.status?.phase || 'unknown';
-                const ready = pod.status?.conditions?.find(
-                  (c) => c.type === 'Ready'
-                )?.status;
+                const ready = pod.status?.conditions?.find((c) => c.type === 'Ready')?.status;
                 log(
                   `🔍 Debug Pod "${pod.metadata.name}": phase=${podStatus}, ready=${ready || 'unknown'}, restartCount=${pod.status?.containerStatuses?.[0]?.restartCount || 0}`
                 );
@@ -618,9 +580,7 @@ export const reconcileCollection = async (apiObj) => {
                 }
               }
             } catch (podsErr) {
-              log(
-                `🔍 Debug: Could not list pods for cluster "${clusterName}": ${podsErr.message}`
-              );
+              log(`🔍 Debug: Could not list pods for cluster "${clusterName}": ${podsErr.message}`);
             }
           } catch (debugErr) {
             log(
@@ -637,9 +597,7 @@ export const reconcileCollection = async (apiObj) => {
         log(
           `⚠️ Cluster "${clusterName}" is not ready (status: ${clusterStatus || 'unknown'}) and could not verify StatefulSet. Collection "${name}" will be created when cluster is ready.`
         );
-        log(
-          `🔍 Debug: Could not read StatefulSet "${clusterName}": ${stsErr.message}`
-        );
+        log(`🔍 Debug: Could not read StatefulSet "${clusterName}": ${stsErr.message}`);
         scheduleRetry(currentCollection, 'collection', 5000, 0);
         return;
       }
@@ -654,15 +612,8 @@ export const reconcileCollection = async (apiObj) => {
 
     // Quick health check - try to GET /collections to verify Qdrant is responding
     try {
-      const parameters = await getConnectionParameters(
-        currentCollection,
-        k8sCustomApi,
-        k8sCoreApi
-      );
-      const healthUrl = parameters.url.replace(
-        /\/collections\/[^/]+$/,
-        '/collections'
-      );
+      const parameters = await getConnectionParameters(currentCollection, k8sCustomApi, k8sCoreApi);
+      const healthUrl = parameters.url.replace(/\/collections\/[^/]+$/, '/collections');
       const healthController = new AbortController();
       const healthTimeout = setTimeout(() => healthController.abort(), 5000);
 
@@ -674,16 +625,12 @@ export const reconcileCollection = async (apiObj) => {
       clearTimeout(healthTimeout);
 
       if (!healthResp.ok && healthResp.status !== 404) {
-        log(
-          `⚠️ Qdrant health check returned ${healthResp.status}, but proceeding...`
-        );
+        log(`⚠️ Qdrant health check returned ${healthResp.status}, but proceeding...`);
       } else {
         log(`✅ Qdrant is responding to API requests`);
       }
     } catch (healthErr) {
-      log(
-        `⚠️ Qdrant health check failed: ${healthErr.message}. Will retry in 5s...`
-      );
+      log(`⚠️ Qdrant health check failed: ${healthErr.message}. Will retry in 5s...`);
       scheduleRetry(currentCollection, 'collection', 5000, 0);
       return;
     }
@@ -698,16 +645,12 @@ export const reconcileCollection = async (apiObj) => {
 
     // Always try to create first (PUT is idempotent in Qdrant)
     // If collection already exists, PUT will succeed and update it if needed
-    log(
-      `🚀 Attempting to create/update collection "${name}" in cluster "${clusterName}"...`
-    );
+    log(`🚀 Attempting to create/update collection "${name}" in cluster "${clusterName}"...`);
     try {
       await createCollection(currentCollection, k8sCustomApi, k8sCoreApi);
       log(`✅ Collection "${name}" creation/update completed successfully`);
     } catch (createErr) {
-      log(
-        `❌ Failed to create collection "${name}": ${createErr.message}. Will retry...`
-      );
+      log(`❌ Failed to create collection "${name}": ${createErr.message}. Will retry...`);
       throw createErr; // Re-throw to be caught by outer catch
     }
     try {

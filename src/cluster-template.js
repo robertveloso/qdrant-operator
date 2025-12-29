@@ -6,12 +6,9 @@ export const clusterTemplate = (apiObj) => {
   var template = jsrender.templates('./templates/statefulset.jsr');
   var persistence = typeof apiObj.spec.persistence !== 'undefined';
   // render yaml with additional boolean for checking persistence
-  var jsontemplate = yaml.load(
-    template({ ...apiObj, ...{ persistence: persistence } })
-  );
+  var jsontemplate = yaml.load(template({ ...apiObj, ...{ persistence: persistence } }));
   // assign all specific array/object type specs
-  jsontemplate.spec.template.spec.containers[0].resources =
-    apiObj.spec.resources;
+  jsontemplate.spec.template.spec.containers[0].resources = apiObj.spec.resources;
   jsontemplate.spec.template.spec.containers[0].volumeMounts = [
     ...jsontemplate.spec.template.spec.containers[0].volumeMounts,
     ...apiObj.spec.additionalVolumeMounts
@@ -25,12 +22,9 @@ export const clusterTemplate = (apiObj) => {
     ...apiObj.spec.sidecarContainers
   ];
   jsontemplate.spec.template.spec.tolerations = apiObj.spec.tolerations;
-  jsontemplate.spec.template.spec.topologySpreadConstraints =
-    apiObj.spec.topologySpreadConstraints;
-  jsontemplate.spec.template.spec.affinity.nodeAffinity =
-    apiObj.spec.nodeAffinity;
-  jsontemplate.spec.template.spec.affinity.podAntiAffinity =
-    apiObj.spec.podAntiAffinity;
+  jsontemplate.spec.template.spec.topologySpreadConstraints = apiObj.spec.topologySpreadConstraints;
+  jsontemplate.spec.template.spec.affinity.nodeAffinity = apiObj.spec.nodeAffinity;
+  jsontemplate.spec.template.spec.affinity.podAntiAffinity = apiObj.spec.podAntiAffinity;
   return jsontemplate;
 };
 
@@ -81,9 +75,7 @@ export const clusterConfigmapTemplate = (apiObj) => {
   var jsontemplate = yaml.load(template(apiObj));
   // convert spec.config to yaml if defined
   jsontemplate.data['production.yaml'] =
-    typeof apiObj.spec.config !== 'undefined'
-      ? yaml.dump(apiObj.spec.config)
-      : '';
+    typeof apiObj.spec.config !== 'undefined' ? yaml.dump(apiObj.spec.config) : '';
   return jsontemplate;
 };
 

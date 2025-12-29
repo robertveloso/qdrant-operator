@@ -39,13 +39,10 @@ function shouldReconcileStatefulSet(desired, observed) {
   }
 
   const observedReplicas = observed.spec?.replicas || 0;
-  const observedImage =
-    observed.spec?.template?.spec?.containers?.[0]?.image || '';
+  const observedImage = observed.spec?.template?.spec?.containers?.[0]?.image || '';
   const desiredImage = desired.image || 'qdrant/qdrant:latest';
 
-  return (
-    observedReplicas !== desired.replicas || observedImage !== desiredImage
-  );
+  return observedReplicas !== desired.replicas || observedImage !== desiredImage;
 }
 
 // ============================================================================
@@ -228,10 +225,7 @@ test('shouldReconcileStatefulSet: detects replica drift', (t) => {
     }
   };
 
-  t.true(
-    shouldReconcileStatefulSet(desired, observed),
-    'Should detect replica drift'
-  );
+  t.true(shouldReconcileStatefulSet(desired, observed), 'Should detect replica drift');
 });
 
 test('shouldReconcileStatefulSet: detects image drift', (t) => {
@@ -251,10 +245,7 @@ test('shouldReconcileStatefulSet: detects image drift', (t) => {
     }
   };
 
-  t.true(
-    shouldReconcileStatefulSet(desired, observed),
-    'Should detect image drift'
-  );
+  t.true(shouldReconcileStatefulSet(desired, observed), 'Should detect image drift');
 });
 
 test('shouldReconcileStatefulSet: returns false when no drift', (t) => {

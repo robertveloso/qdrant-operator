@@ -49,9 +49,7 @@ export const cleanupCluster = async (apiObj) => {
       throw new Error(errorMsg);
     }
 
-    log(
-      `Starting cleanup attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS} for cluster "${name}"...`
-    );
+    log(`Starting cleanup attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS} for cluster "${name}"...`);
     await setCleanupStatus(apiObj, 'Retrying', attempt);
 
     try {
@@ -97,16 +95,12 @@ export const cleanupCluster = async (apiObj) => {
           // Wait a bit for graceful shutdown
           await new Promise((resolve) => setTimeout(resolve, 2000));
         } else {
-          log(
-            `StatefulSet "${name}" already scaled to 0 replicas (idempotent cleanup)`
-          );
+          log(`StatefulSet "${name}" already scaled to 0 replicas (idempotent cleanup)`);
         }
       } catch (err) {
         // StatefulSet not found is acceptable - cleanup is idempotent
         if (err.message.includes('not found') || err.code === 404) {
-          log(
-            `StatefulSet "${name}" not found - already deleted (idempotent cleanup)`
-          );
+          log(`StatefulSet "${name}" not found - already deleted (idempotent cleanup)`);
           // Continue with cleanup - this is expected if StatefulSet was already deleted
         } else {
           log(`Error scaling down StatefulSet "${name}": ${err.message}`);
@@ -138,9 +132,7 @@ export const cleanupCluster = async (apiObj) => {
         const jitter = Math.random() * 1000;
         const delay = backoff + jitter;
 
-        log(
-          `Retrying cleanup for "${name}" in ${Math.round(delay / 1000)}s...`
-        );
+        log(`Retrying cleanup for "${name}" in ${Math.round(delay / 1000)}s...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         attempt++;
       } else {
@@ -192,9 +184,7 @@ export const cleanupCollection = async (apiObj) => {
       throw new Error(errorMsg);
     }
 
-    log(
-      `Starting cleanup attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS} for collection "${name}"...`
-    );
+    log(`Starting cleanup attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS} for collection "${name}"...`);
 
     try {
       // Delete the collection from Qdrant
@@ -222,9 +212,7 @@ export const cleanupCollection = async (apiObj) => {
         const jitter = Math.random() * 1000;
         const delay = backoff + jitter;
 
-        log(
-          `Retrying cleanup for collection "${name}" in ${Math.round(delay / 1000)}s...`
-        );
+        log(`Retrying cleanup for collection "${name}" in ${Math.round(delay / 1000)}s...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         attempt++;
       } else {

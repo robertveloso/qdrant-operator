@@ -11,12 +11,7 @@ import {
 import { addFinalizer, removeFinalizer } from './finalizers.js';
 import { cleanupCluster, cleanupCollection } from './cleanup.js';
 import { scheduleReconcile, reconcileCollection, reconcileRestore } from './reconciliation.js';
-import {
-  reconcileTotal,
-  reconcileDuration,
-  errorsTotal,
-  reconcileQueueDepth
-} from './metrics.js';
+import { reconcileTotal, reconcileDuration, errorsTotal, reconcileQueueDepth } from './metrics.js';
 import { deleteCollection } from './collection-ops.js';
 import { log } from './utils.js';
 
@@ -30,9 +25,7 @@ export const onEventCluster = async (phase, apiObj) => {
   try {
     // If status is being updated, queue this event instead of ignoring it
     if (settingStatus.has(resourceKey)) {
-      log(
-        `Status update in progress for "${name}", queuing ${phase} event for later processing`
-      );
+      log(`Status update in progress for "${name}", queuing ${phase} event for later processing`);
       if (!pendingEvents.has(resourceKey)) {
         pendingEvents.set(resourceKey, []);
       }
@@ -41,27 +34,19 @@ export const onEventCluster = async (phase, apiObj) => {
       return;
     }
     // ignore duplicated event on watch reconnections (per-cluster)
-    if (
-      lastClusterResourceVersion.get(resourceKey) ===
-      apiObj.metadata.resourceVersion
-    ) {
+    if (lastClusterResourceVersion.get(resourceKey) === apiObj.metadata.resourceVersion) {
       endTimer();
       return;
     }
     // update ResourceVersion for this specific cluster
-    lastClusterResourceVersion.set(
-      resourceKey,
-      apiObj.metadata.resourceVersion
-    );
+    lastClusterResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
     // Update cache
     if (phase === 'ADDED' || phase === 'MODIFIED') {
       clusterCache.set(resourceKey, apiObj);
     } else if (phase === 'DELETED') {
       clusterCache.delete(resourceKey);
     }
-    log(
-      `Received event in phase ${phase} for cluster "${name}" in namespace "${namespace}".`
-    );
+    log(`Received event in phase ${phase} for cluster "${name}" in namespace "${namespace}".`);
 
     // Handle deletion with finalizer (with retry and backoff)
     if (apiObj.metadata.deletionTimestamp) {
@@ -161,10 +146,7 @@ export const onEventCollection = async (phase, apiObj) => {
     );
 
     // ignore duplicated event on watch reconnections (per-collection)
-    if (
-      lastCollectionResourceVersion.get(resourceKey) ===
-      apiObj.metadata.resourceVersion
-    ) {
+    if (lastCollectionResourceVersion.get(resourceKey) === apiObj.metadata.resourceVersion) {
       log(
         `⏭️ Skipping duplicate event for collection "${name}" (resourceVersion: ${apiObj.metadata.resourceVersion})`
       );
@@ -172,10 +154,7 @@ export const onEventCollection = async (phase, apiObj) => {
       return;
     }
     // update ResourceVersion for this specific collection
-    lastCollectionResourceVersion.set(
-      resourceKey,
-      apiObj.metadata.resourceVersion
-    );
+    lastCollectionResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
     // Update cache
     if (phase === 'ADDED' || phase === 'MODIFIED') {
       collectionCache.set(resourceKey, apiObj);
@@ -221,9 +200,7 @@ export const onEventCollection = async (phase, apiObj) => {
       await addFinalizer(apiObj, 'qdrantcollections');
       log(`✅ Finalizer added/verified for collection "${name}"`);
     } catch (finalizerErr) {
-      log(
-        `❌ Error adding finalizer to collection "${name}": ${finalizerErr.message}`
-      );
+      log(`❌ Error adding finalizer to collection "${name}": ${finalizerErr.message}`);
       // Continue anyway - reconciliation can proceed without finalizer initially
       // Finalizer will be added on next event or periodic reconciliation
     }
@@ -237,9 +214,7 @@ export const onEventCollection = async (phase, apiObj) => {
         // CRITICAL: Also trigger immediate reconciliation for ADDED events
         // This ensures collection is processed even if scheduled one fails or is delayed
         if (phase === 'ADDED') {
-          log(
-            `🚀 Triggering immediate reconciliation for new collection "${name}"...`
-          );
+          log(`🚀 Triggering immediate reconciliation for new collection "${name}"...`);
           // Don't await - let it run in background, scheduled one will also run
           reconcileCollection(apiObj).catch((err) => {
             log(
