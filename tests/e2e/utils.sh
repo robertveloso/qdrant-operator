@@ -111,6 +111,7 @@ wait_for_cluster_healthy() {
 }
 
 # Wait for collection to be green in Qdrant
+# Uses port-forward instead of exec (Qdrant image doesn't have curl)
 wait_for_collection_green() {
   local cluster_name=$1
   local collection_name=$2
@@ -148,41 +149,37 @@ wait_for_collection_green() {
     log_warn "⚠️ Pod ${pod} may not be ready yet, but continuing..."
   fi
 
+  # Use port-forward instead of exec (Qdrant image doesn't have curl)
+  local local_port=6333
+  log_info "Setting up port-forward to Qdrant API..."
+  kubectl port-forward -n "${namespace}" "pod/${pod}" "${local_port}:6333" > /dev/null 2>&1 &
+  local port_forward_pid=$!
+
+  # Wait for port-forward to be ready
+  sleep 2
+  if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
+    log_error "Port-forward failed to start"
+    return 1
+  fi
+
+  # Cleanup function
+  local cleanup_done=false
+  cleanup_port_forward() {
+    if [ "${cleanup_done}" = "false" ]; then
+      cleanup_done=true
+      kill "${port_forward_pid}" 2>/dev/null || true
+      wait "${port_forward_pid}" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_port_forward EXIT
+
   local elapsed=0
   local last_status=""
   local last_response=""
-  local curl_works=false
-
-  # First, verify we can execute commands in the pod
-  log_info "Verifying pod connectivity..."
-  if kubectl exec -n "${namespace}" "${pod}" -- echo "test" > /dev/null 2>&1; then
-    curl_works=true
-    log_info "✅ Pod connectivity verified"
-  else
-    log_warn "⚠️ Cannot execute commands in pod ${pod}, but continuing..."
-  fi
 
   while [ $elapsed -lt $timeout ]; do
-    # Try to get collection status from Qdrant API
-    # Use timeout to avoid hanging
-    local response=""
-    if [ "${curl_works}" = "true" ]; then
-      # Try curl first
-      response=$(kubectl exec -n "${namespace}" "${pod}" -- \
-        sh -c "timeout 5 curl -s http://localhost:6333/collections/${collection_name} 2>&1" 2>/dev/null || echo "")
-
-      # If curl fails, try wget as fallback
-      if [ -z "${response}" ] || echo "${response}" | grep -q "command not found\|Connection refused\|timeout"; then
-        response=$(kubectl exec -n "${namespace}" "${pod}" -- \
-          sh -c "timeout 5 wget -qO- http://localhost:6333/collections/${collection_name} 2>&1" 2>/dev/null || echo "")
-      fi
-    else
-      # If we can't exec, try port-forward as last resort
-      if [ $elapsed -eq 0 ]; then
-        log_warn "⚠️ Cannot exec into pod, collection status check may not work"
-      fi
-    fi
-
+    # Query Qdrant API via port-forward
+    local response=$(curl -s "http://localhost:${local_port}/collections/${collection_name}" 2>/dev/null || echo "")
     last_response="${response}"
 
     if [ -n "${response}" ]; then
@@ -217,24 +214,11 @@ wait_for_collection_green() {
       # If curl fails, try to check if collection exists by listing all collections
       if [ $((elapsed % 10)) -eq 0 ]; then
         log_warn "⚠️ Could not query collection status, checking if collection exists..."
-        if [ "${curl_works}" = "true" ]; then
-          local collections_list=$(kubectl exec -n "${namespace}" "${pod}" -- \
-            sh -c "timeout 5 curl -s http://localhost:6333/collections 2>&1" 2>/dev/null || echo "")
-          if echo "${collections_list}" | grep -q "${collection_name}"; then
-            log_info "Collection ${collection_name} exists in Qdrant, but status query failed"
-            # If collection exists but we can't get status, it might be in a transitional state
-            # Try to get more info about why curl is failing
-            log_info "Checking Qdrant API health..."
-            local health_check=$(kubectl exec -n "${namespace}" "${pod}" -- \
-              sh -c "timeout 5 curl -s http://localhost:6333/health 2>&1" 2>/dev/null || echo "")
-            if [ -n "${health_check}" ]; then
-              log_info "Qdrant health check: ${health_check}"
-            else
-              log_warn "⚠️ Qdrant health check also failed - API may not be accessible"
-            fi
-          else
-            log_info "Collection ${collection_name} not found in Qdrant yet"
-          fi
+        local collections_list=$(curl -s "http://localhost:${local_port}/collections" 2>/dev/null || echo "")
+        if echo "${collections_list}" | grep -q "${collection_name}"; then
+          log_info "Collection ${collection_name} exists in Qdrant, but status query failed"
+        else
+          log_info "Collection ${collection_name} not found in Qdrant yet"
         fi
       fi
     fi
@@ -242,6 +226,10 @@ wait_for_collection_green() {
     sleep 2
     elapsed=$((elapsed + 2))
   done
+
+  # Cleanup port-forward
+  cleanup_port_forward
+  trap - EXIT
 
   log_error "Collection ${collection_name} did not become green within timeout"
   log_info "Diagnostics:"
@@ -251,20 +239,18 @@ wait_for_collection_green() {
   kubectl get qdrantcollections "${collection_name}" -n "${namespace}" -o yaml 2>/dev/null | head -30 || true
   log_info "  Qdrant pod status:"
   kubectl get pod "${pod}" -n "${namespace}" -o yaml 2>/dev/null | grep -A 10 "status:" || true
-  log_info "  Attempting to get collection info from Qdrant:"
-  kubectl exec -n "${namespace}" "${pod}" -- \
-    sh -c "timeout 5 curl -s http://localhost:6333/collections/${collection_name} 2>&1" 2>/dev/null || log_warn "  Failed to query Qdrant API"
+  # Try to query via port-forward for diagnostics
+  log_info "  Attempting to get collection info from Qdrant (via port-forward):"
+  kubectl port-forward -n "${namespace}" "pod/${pod}" 6333:6333 > /dev/null 2>&1 &
+  local diag_pf_pid=$!
+  sleep 2
+  curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || log_warn "  Failed to query Qdrant API"
   log_info "  Checking Qdrant health endpoint:"
-  kubectl exec -n "${namespace}" "${pod}" -- \
-    sh -c "timeout 5 curl -s http://localhost:6333/health 2>&1" 2>/dev/null || log_warn "  Failed to query Qdrant health"
+  curl -s "http://localhost:6333/health" 2>/dev/null || log_warn "  Failed to query Qdrant health"
   log_info "  Listing all collections in Qdrant:"
-  kubectl exec -n "${namespace}" "${pod}" -- \
-    sh -c "timeout 5 curl -s http://localhost:6333/collections 2>&1" 2>/dev/null | head -20 || log_warn "  Failed to list collections"
-  log_info "  Checking if curl is available in pod:"
-  kubectl exec -n "${namespace}" "${pod}" -- \
-    sh -c "which curl || echo 'curl not found'" 2>/dev/null || log_warn "  Cannot check for curl"
-  log_info "  Testing basic pod exec:"
-  kubectl exec -n "${namespace}" "${pod}" -- echo "exec test" 2>&1 || log_warn "  Pod exec failed"
+  curl -s "http://localhost:6333/collections" 2>/dev/null | head -20 || log_warn "  Failed to list collections"
+  kill "${diag_pf_pid}" 2>/dev/null || true
+  wait "${diag_pf_pid}" 2>/dev/null || true
   log_info "  Operator logs (last 50 lines, filtered for collection):"
   OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
   if [ -n "${OPERATOR_POD}" ]; then

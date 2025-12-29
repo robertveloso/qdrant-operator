@@ -34,13 +34,19 @@ if [ -n "${QDRANT_POD}" ]; then
   log_info "Waiting for Qdrant pod to be ready..."
   kubectl wait --for=condition=ready pod "${QDRANT_POD}" -n default --timeout=30s 2>/dev/null || true
 
-  # Try to delete collection directly in Qdrant
-  log_info "Attempting to delete collection in Qdrant..."
-  DELETE_RESPONSE=$(kubectl exec -n default "${QDRANT_POD}" -- \
-    timeout 10 curl -s -X DELETE "http://localhost:6333/collections/my-collection" 2>/dev/null || echo "")
+  # Use port-forward to delete collection (Qdrant image doesn't have curl)
+  log_info "Attempting to delete collection in Qdrant via port-forward..."
+  kubectl port-forward -n default "pod/${QDRANT_POD}" 6333:6333 > /dev/null 2>&1 &
+  local pf_pid=$!
+  sleep 2
+
+  DELETE_RESPONSE=$(curl -s -X DELETE "http://localhost:6333/collections/my-collection" 2>/dev/null || echo "")
   if [ -n "${DELETE_RESPONSE}" ]; then
     log_info "Delete response: ${DELETE_RESPONSE}"
   fi
+
+  kill "${pf_pid}" 2>/dev/null || true
+  wait "${pf_pid}" 2>/dev/null || true
   sleep 2
 fi
 

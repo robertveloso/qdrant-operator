@@ -240,6 +240,31 @@ export const createCollection = async (apiObj, k8sCustomApi, k8sCoreApi) => {
     log(`Response status: "${JSON.stringify(data.status)}", time: "${data.time}".`);
 
     // Check HTTP status code first
+    // HTTP 409 (Conflict) means collection already exists - this is idempotent success
+    if (resp.status === 409) {
+      const errorMsg = data.status?.error || `Collection already exists`;
+      log(`✅ Collection "${name}" already exists (HTTP 409) - treating as idempotent success`);
+      // Verify the collection exists and is accessible
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const getResp = await fetch(parameters.url, {
+          method: 'GET',
+          headers: parameters.headers,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (getResp.ok) {
+          log(`✅ Verified collection "${name}" exists and is accessible`);
+          return; // Success - collection exists
+        }
+      } catch (verifyErr) {
+        log(`⚠️ Could not verify collection exists, but treating 409 as success: ${verifyErr.message}`);
+        return; // Still treat as success - 409 means it exists
+      }
+      return; // Collection exists, reconciliation successful
+    }
+
     if (!resp.ok) {
       const errorMsg = data.status?.error || `HTTP ${resp.status}: ${resp.statusText}`;
       log(`❌ Collection creation failed with HTTP ${resp.status}: ${JSON.stringify(errorMsg)}`);
