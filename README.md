@@ -26,6 +26,7 @@ The operator provides the following functionality:
 - Support for setting custom Qdrant parameters.
 - Support for setting various scheduling options for the cluster (tolerations, affinities, topology spread).
 - Management of Qdrant collections, including configuration of replication, sharding, indexing, quantization, etc.
+- **Control Plane API**: REST API for high-level collection management, templates, backups, and restore operations.
 - The operator works in cluster mode with leader elections, ensuring high availability.
 - The operator allows to create instant and scheduled snapshots and store them in any S3-compatible storage.
 
@@ -59,6 +60,8 @@ The operator includes two custom resources - `QdrantCluster` and `QdrantCollecti
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/ganochenkodg/qdrant-operator/main/deploy/crds/crd-qdrantcluster.yaml
 kubectl apply -f https://raw.githubusercontent.com/ganochenkodg/qdrant-operator/main/deploy/crds/crd-qdrantcollection.yaml
+kubectl apply -f https://raw.githubusercontent.com/ganochenkodg/qdrant-operator/main/deploy/crds/crd-qdrantcollectiontemplate.yaml
+kubectl apply -f https://raw.githubusercontent.com/ganochenkodg/qdrant-operator/main/deploy/crds/crd-qdrantcollectionrestore.yaml
 ```
 
 You will see the next output:
@@ -203,6 +206,45 @@ spec:
   apikey: 'true'
   readApikey: 'readoperationskey123'
 ```
+
+### 🎮 Control Plane API
+
+The operator exposes a REST API (port 8081) that acts as a **control-plane for data management**. This API provides high-level endpoints for managing collections, templates, backups, and restore operations.
+
+**Key Features:**
+
+- Create collections from templates (standardized configurations)
+- List and manage collections
+- List backups for collections
+- Restore collections from backups
+- Manage collection templates
+
+**Architecture:**
+
+```
+Client → API Server → CRDs → Reconciler → Qdrant
+```
+
+The API creates/updates Kubernetes CRDs, and the existing reconciler handles all Qdrant operations. This maintains the declarative model while providing a convenient API for applications.
+
+**Example:**
+
+```bash
+# Create collection with template
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "name": "products",
+    "cluster": "my-cluster",
+    "template": "default-vectors"
+  }' \
+  "http://qdrant-operator.qdrant-operator:8081/api/v1/collections?namespace=default"
+```
+
+For detailed API documentation, see [API Usage Guide](examples/api-usage.md).
+
+For architecture decisions, see [ADR-002: Control Plane API](docs/adr-002-control-plane-api.md).
 
 ### 💾 Backups
 

@@ -120,6 +120,8 @@ export const scheduleReconcile = (apiObj, resourceType) => {
         await reconcileCluster(apiObj);
       } else if (resourceType === 'collection') {
         await reconcileCollection(apiObj);
+      } else if (resourceType === 'restore') {
+        await reconcileRestore(apiObj);
       }
       log(`✅ Completed reconciliation for ${resourceType} "${name}"`);
     } catch (err) {
@@ -740,6 +742,145 @@ export const reconcileCollection = async (apiObj) => {
       // If we can't fetch latest, use provided object
       scheduleRetry(apiObj, 'collection', 5000, 0);
     }
+  }
+};
+
+// Declarative reconciliation for restore operations
+export const reconcileRestore = async (restoreObj) => {
+  const name = restoreObj.metadata.name;
+  const namespace = restoreObj.metadata.namespace;
+  const collectionName = restoreObj.spec.collection;
+  const backupId = restoreObj.spec.backupId;
+
+  log(
+    `🔄 Starting reconciliation for restore "${name}" (collection: "${collectionName}", backup: "${backupId}")`
+  );
+
+  // Get current status
+  const currentPhase = restoreObj.status?.phase || 'Pending';
+
+  // If already completed or failed, skip
+  if (currentPhase === 'Completed' || currentPhase === 'Failed') {
+    log(`⏭️ Restore "${name}" already ${currentPhase}, skipping`);
+    return;
+  }
+
+  try {
+    // Update status to InProgress
+    if (currentPhase !== 'InProgress') {
+      const { updateRestoreStatus } = await import('./restore-ops.js');
+      await updateRestoreStatus(restoreObj, 'InProgress', 'Restore operation started');
+    }
+
+    // Execute restore
+    const { executeRestore } = await import('./restore-ops.js');
+    const jobName = await executeRestore(restoreObj, k8sCustomApi, k8sBatchApi);
+
+    // Wait for job to complete (polling)
+    log(`⏳ Waiting for restore job "${jobName}" to complete...`);
+    let jobCompleted = false;
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes max (5s * 120)
+
+    while (!jobCompleted && attempts < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait 5 seconds
+
+      try {
+        const job = await k8sBatchApi.readNamespacedJob(jobName, namespace);
+        const jobStatus = job.body.status;
+
+        if (jobStatus.succeeded) {
+          jobCompleted = true;
+          const { updateRestoreStatus } = await import('./restore-ops.js');
+          // Fetch latest restore object before updating status
+          const latestRestore = await k8sCustomApi.getNamespacedCustomObject({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: namespace,
+            plural: 'qdrantcollectionrestores',
+            name: name
+          });
+          await updateRestoreStatus(
+            latestRestore.body || latestRestore,
+            'Completed',
+            `Restore completed successfully. Job: ${jobName}`
+          );
+          log(`✅ Restore "${name}" completed successfully`);
+        } else if (jobStatus.failed) {
+          jobCompleted = true;
+          const { updateRestoreStatus } = await import('./restore-ops.js');
+          const latestRestore = await k8sCustomApi.getNamespacedCustomObject({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: namespace,
+            plural: 'qdrantcollectionrestores',
+            name: name
+          });
+          await updateRestoreStatus(
+            latestRestore.body || latestRestore,
+            'Failed',
+            `Restore job failed. Job: ${jobName}`,
+            'Job execution failed'
+          );
+          log(`❌ Restore "${name}" failed`);
+        }
+        // If job is still running, continue polling
+      } catch (err) {
+        if (err.statusCode === 404) {
+          // Job not found yet, continue waiting
+          attempts++;
+          continue;
+        }
+        throw err;
+      }
+
+      attempts++;
+    }
+
+    if (!jobCompleted) {
+      const { updateRestoreStatus } = await import('./restore-ops.js');
+      const latestRestore = await k8sCustomApi.getNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantcollectionrestores',
+        name: name
+      });
+      await updateRestoreStatus(
+        latestRestore.body || latestRestore,
+        'Failed',
+        'Restore operation timed out',
+        'Job did not complete within timeout period'
+      );
+      log(`❌ Restore "${name}" timed out after ${maxAttempts * 5} seconds`);
+    }
+  } catch (err) {
+    log(`❌ Error reconciling restore "${name}": ${err.message}`);
+    const { updateRestoreStatus } = await import('./restore-ops.js');
+    try {
+      const latestRestore = await k8sCustomApi.getNamespacedCustomObject({
+        group: 'qdrant.operator',
+        version: 'v1alpha1',
+        namespace: namespace,
+        plural: 'qdrantcollectionrestores',
+        name: name
+      });
+      await updateRestoreStatus(
+        latestRestore.body || latestRestore,
+        'Failed',
+        `Restore operation failed: ${err.message}`,
+        err.message
+      );
+    } catch (fetchErr) {
+      // If we can't fetch latest, try with provided object
+      await updateRestoreStatus(
+        restoreObj,
+        'Failed',
+        `Restore operation failed: ${err.message}`,
+        err.message
+      );
+    }
+    errorsTotal.inc({ type: 'restore' });
   }
 };
 

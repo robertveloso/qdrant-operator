@@ -10,7 +10,7 @@ import {
 } from './state.js';
 import { addFinalizer, removeFinalizer } from './finalizers.js';
 import { cleanupCluster, cleanupCollection } from './cleanup.js';
-import { scheduleReconcile, reconcileCollection } from './reconciliation.js';
+import { scheduleReconcile, reconcileCollection, reconcileRestore } from './reconciliation.js';
 import {
   reconcileTotal,
   reconcileDuration,

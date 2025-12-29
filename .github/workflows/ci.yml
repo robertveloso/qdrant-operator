@@ -210,5 +210,20 @@ jobs:
           # VolumeSnapshot scheduled: Verify scheduled snapshots via CronJob
           tests/e2e/130-volumesnapshot-scheduled.sh
 
+          # API collections: Verify API endpoints for collections
+          tests/e2e/140-api-collections.sh
+
+          # API restore: Verify restore operations via API
+          tests/e2e/150-api-restore.sh
+
+          # API authentication: Verify API authentication
+          tests/e2e/160-api-authentication.sh
+
+          # API templates: Verify template CRD and API endpoints
+          tests/e2e/170-api-templates.sh
+
+          # API integration: Full E2E test - API → CRD → Reconciler → Qdrant
+          tests/e2e/180-api-integration.sh
+
           echo ""
           echo "✅ All E2E tests passed!"

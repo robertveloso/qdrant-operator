@@ -15,6 +15,7 @@ import {
   reconcileQueueDepth,
   startMetricsServer
 } from './metrics.js';
+import { startApiServer } from './api-server.js';
 import { log } from './utils.js';
 
 // Set debug mode, false by default
@@ -73,6 +74,10 @@ const main = async () => {
   // Start metrics server
   const metricsPort = process.env.METRICS_PORT || 8080;
   startMetricsServer(metricsPort);
+
+  // Start API server
+  const apiPort = process.env.API_PORT || 8081;
+  startApiServer(apiPort);
 
   // Initialize queue depth metric
   reconcileQueueDepth.set(0);

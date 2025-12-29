@@ -12,7 +12,7 @@ import {
 } from './state.js';
 import { watchRestarts, errorsTotal, watchActive } from './metrics.js';
 import { log } from './utils.js';
-import { onEventCluster, onEventCollection } from './events.js';
+import { onEventCluster, onEventCollection, onEventRestore } from './events.js';
 import { scheduleReconcile } from './reconciliation.js';
 
 // Wrapper function to safely call readNamespacedLease with proper validation

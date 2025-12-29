@@ -30,7 +30,7 @@ spec:
         - name: CLUSTER_NAME
           value: {{:spec.cluster}}
         - name: COLLECTION_NAME
-          value: {{:metadata.name}}
+          value: {{:collectionName}}
         - name: CONNECTION_METHOD
           value: {{:connectionMethod}}
         - name: BUCKET_NAME

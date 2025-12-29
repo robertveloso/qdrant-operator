@@ -1,0 +1,16 @@
+apiVersion: qdrant.operator/v1alpha1
+kind: QdrantCollectionTemplate
+metadata:
+  name: default-vectors
+spec:
+  name: default-vectors
+  shards: 6
+  replicationFactor: 2
+  onDisk: true
+  vectors:
+    size: 768
+    distance: Cosine
+  backup:
+    enabled: true
+    schedule: '0 2 * * *' # Daily at 2 AM
+    retentionCount: 7

@@ -240,6 +240,89 @@ Garante backups automáticos e regulares. Valida que retention policy previne ac
 
 **Nota**: Teste é pulado automaticamente se VolumeSnapshot API não estiver disponível (CSI snapshot feature não instalado).
 
+### `140-api-collections.sh` - API Collections
+
+Valida criação e listagem de collections via API REST.
+
+**O que testa:**
+
+- Criar collection via API (`POST /api/v1/collections`)
+- Listar collections via API (`GET /api/v1/collections`)
+- Obter collection específica (`GET /api/v1/collections/{name}`)
+- Criar collection usando template
+- Validação de requests (campos obrigatórios)
+
+**Por que é importante:**
+
+Garante que a API REST funciona corretamente e cria CRDs que são reconciliados pelo operator.
+
+### `150-api-restore.sh` - API Restore
+
+Valida operações de restore via API REST.
+
+**O que testa:**
+
+- Criar restore via API (`POST /api/v1/restore/collections/{name}`)
+- Verificar status de restore (`GET /api/v1/restore/collections/{name}`)
+- Restore com dados dummy (insere dados, faz backup, restaura)
+
+**Por que é importante:**
+
+Garante que restore via API cria CRDs corretos e que a reconciliação funciona.
+
+**Nota**: Requer configuração de S3 para backups completos. Teste é parcialmente executado mesmo sem S3 configurado.
+
+### `160-api-authentication.sh` - API Authentication
+
+Valida autenticação da API REST.
+
+**O que testa:**
+
+- Request sem token (deve falhar em produção, permitir em dev)
+- Request com token inválido (deve retornar 401)
+- Request com token válido (deve retornar 200)
+- Formatos de header (`Bearer` e `Token`)
+
+**Por que é importante:**
+
+Garante que autenticação funciona corretamente e protege a API.
+
+### `170-api-templates.sh` - API Templates
+
+Valida criação e uso de templates via API e CRD.
+
+**O que testa:**
+
+- Criar template via API (`POST /api/v1/templates`)
+- Listar templates via API (`GET /api/v1/templates`)
+- Obter template específico (`GET /api/v1/templates/{name}`)
+- Criar collection usando template
+- Criar template via kubectl (CRD direto) e acessar via API
+- Validação de templates (nome obrigatório, formato)
+
+**Por que é importante:**
+
+Garante que templates funcionam tanto via API quanto via CRD direto, e que collections criadas com templates herdam as configurações corretas.
+
+### `180-api-integration.sh` - API Integration E2E
+
+Teste end-to-end completo validando o fluxo: API → CRD → Reconciler → Qdrant.
+
+**O que testa:**
+
+- Criar template via API
+- Criar collection via API usando template
+- Verificar que CRD foi criado
+- Verificar que reconciler criou collection no Qdrant
+- Inserir dados dummy na collection
+- Verificar que dados estão acessíveis
+- Verificar que collection aparece na API
+- Validar fluxo completo: API → CRD → Reconciler → Qdrant → API
+
+**Por que é importante:**
+
+Este é o teste mais importante - valida que toda a cadeia funciona: API cria CRD, reconciler processa CRD, Qdrant recebe collection, e API reflete o estado final. Garante que não há gaps na integração.
+
 ## 🚀 Como Executar
 
 ### Localmente
@@ -267,6 +350,11 @@ chmod +x *.sh
 ./110-pvc-auto-resize.sh
 ./120-volumesnapshot-manual.sh
 ./130-volumesnapshot-scheduled.sh
+./140-api-collections.sh
+./150-api-restore.sh
+./160-api-authentication.sh
+./170-api-templates.sh
+./180-api-integration.sh
 ```
 
 ### No CI/CD
@@ -293,18 +381,35 @@ tests/e2e/
 ├── 100-delete-partial-cleanup.sh    # Delete com cleanup parcial
 ├── 110-pvc-auto-resize.sh          # Resize automático de PVCs
 ├── 120-volumesnapshot-manual.sh     # VolumeSnapshot manual
-└── 130-volumesnapshot-scheduled.sh  # VolumeSnapshot agendado
+├── 130-volumesnapshot-scheduled.sh  # VolumeSnapshot agendado
+├── 140-api-collections.sh           # API: criar/listar collections
+├── 150-api-restore.sh               # API: restore operations
+├── 160-api-authentication.sh        # API: autenticação
+├── 170-api-templates.sh             # API: templates CRD
+└── 180-api-integration.sh           # API: E2E completo
 ```
 
-## 🔧 Utilitários (`utils.sh`)
+## 🔧 Utilitários
 
-O arquivo `utils.sh` contém funções compartilhadas:
+### `utils.sh`
+
+Funções compartilhadas para testes básicos:
 
 - `log_info`, `log_warn`, `log_error`, `log_test` - Logging colorido
 - `wait_for_resource` - Aguarda recurso ser criado
 - `wait_for_deletion` - Aguarda recurso ser deletado
 - `get_operator_pod` - Obtém nome do pod do operator
 - `is_operator_leader` - Verifica se pod é leader
+
+### `utils-api.sh`
+
+Funções utilitárias para testes da API REST:
+
+- `get_api_token` - Obtém token da API do operator
+- `get_api_url` - Obtém URL base da API
+- `api_request` - Faz requisição HTTP para a API
+- `insert_dummy_data` - Insere dados dummy em uma collection
+- `wait_for_collection_data` - Aguarda collection ter dados
 
 ## ✅ Critérios de Sucesso
 
@@ -321,6 +426,11 @@ Um operator confiável deve passar em todos estes testes:
 9. ✅ **Reconciliação Periódica**: Safety net funciona sem eventos
 10. ✅ **Rollout Controlado**: Updates são seguros e controlados
 11. ✅ **Cleanup Idempotente**: Lida com estado parcial
+12. ✅ **API Collections**: API REST funciona para criar/listar collections
+13. ✅ **API Restore**: API REST funciona para restore operations
+14. ✅ **API Authentication**: Autenticação da API funciona corretamente
+15. ✅ **API Templates**: Templates funcionam via API e CRD
+16. ✅ **API Integration**: Fluxo completo API → CRD → Reconciler → Qdrant funciona
 
 > **Regra de Ouro**: Se seu operator passa nesses testes, ele é confiável em produção.
 
