@@ -196,18 +196,53 @@ wait_for_collection_green() {
           log_warn "⚠️ Qdrant API returned error: ${error_msg}"
         fi
       else
-        # Try to extract status
-        local status=$(echo "${response}" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+        # Extract status from result.status (not top-level status)
+        # Qdrant returns: {"result": {"status": "green", ...}, "status": "ok"}
+        # We want result.status, not the top-level status
+        local status=""
+
+        # Try using jq if available (most reliable)
+        if command -v jq > /dev/null 2>&1; then
+          status=$(echo "${response}" | jq -r '.result.status // empty' 2>/dev/null || echo "")
+        fi
+
+        # Fallback to grep/sed if jq not available
+        if [ -z "${status}" ]; then
+          # Extract status from inside result object, avoiding top-level status
+          # Look for "result" followed by object with "status" inside it
+          status=$(echo "${response}" | sed -E 's/.*"result"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' | head -1 || echo "")
+        fi
+
+        # Final fallback: simple grep but filter out "ok"
+        if [ -z "${status}" ] || [ "${status}" = "ok" ]; then
+          # Get all status values and take the first one that's not "ok"
+          status=$(echo "${response}" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 | grep -v "^ok$" | head -1 || echo "")
+        fi
+
+        # Trim whitespace to be safe
+        status=$(echo "${status}" | xargs)
         last_status="${status}"
 
-        if [ "${status}" = "green" ]; then
+        # Check if status is green (do this check IMMEDIATELY after extraction, every iteration)
+        # Use case-insensitive comparison and trim to handle any edge cases
+        status_lower=$(echo "${status}" | tr '[:upper:]' '[:lower:]' | xargs)
+        if [ "${status_lower}" = "green" ]; then
           log_info "✅ Collection is green"
+          cleanup_port_forward
+          trap - EXIT
           return 0
         fi
 
-        # Log status every 10 seconds
+        # Debug: log what we extracted (only if not green, and only every 10 seconds)
         if [ $((elapsed % 10)) -eq 0 ] && [ -n "${status}" ]; then
           log_info "Collection status: ${status} (${elapsed}s/${timeout}s)"
+        fi
+
+        # If status is empty or "ok", log warning
+        if [ $((elapsed % 10)) -eq 0 ] && [ -z "${status}" ]; then
+          log_warn "⚠️ Could not extract collection status from response"
+        elif [ $((elapsed % 10)) -eq 0 ] && [ "${status}" = "ok" ]; then
+          log_warn "⚠️ Extracted top-level status 'ok' instead of result.status"
         fi
       fi
     else
