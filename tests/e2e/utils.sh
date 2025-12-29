@@ -150,28 +150,53 @@ wait_for_collection_green() {
 
   local elapsed=0
   local last_status=""
+  local last_response=""
   while [ $elapsed -lt $timeout ]; do
     # Try to get collection status from Qdrant API
+    # Use timeout to avoid hanging
     local response=$(kubectl exec -n "${namespace}" "${pod}" -- \
-      curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || echo "")
+      timeout 5 curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || echo "")
+    last_response="${response}"
 
     if [ -n "${response}" ]; then
-      local status=$(echo "${response}" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
-      last_status="${status}"
+      # Check if response contains error
+      if echo "${response}" | grep -q '"error"'; then
+        local error_msg=$(echo "${response}" | grep -o '"error":"[^"]*"' | cut -d'"' -f4 || echo "")
+        if echo "${error_msg}" | grep -q "doesn't exist\|not found"; then
+          # Collection doesn't exist yet, continue waiting
+          if [ $((elapsed % 10)) -eq 0 ]; then
+            log_info "Collection doesn't exist yet, waiting... (${elapsed}s/${timeout}s)"
+          fi
+        else
+          # Other error
+          log_warn "⚠️ Qdrant API returned error: ${error_msg}"
+        fi
+      else
+        # Try to extract status
+        local status=$(echo "${response}" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+        last_status="${status}"
 
-      if [ "${status}" = "green" ]; then
-        log_info "✅ Collection is green"
-        return 0
-      fi
+        if [ "${status}" = "green" ]; then
+          log_info "✅ Collection is green"
+          return 0
+        fi
 
-      # Log status every 10 seconds
-      if [ $((elapsed % 10)) -eq 0 ] && [ -n "${status}" ]; then
-        log_info "Collection status: ${status} (${elapsed}s/${timeout}s)"
+        # Log status every 10 seconds
+        if [ $((elapsed % 10)) -eq 0 ] && [ -n "${status}" ]; then
+          log_info "Collection status: ${status} (${elapsed}s/${timeout}s)"
+        fi
       fi
     else
-      # If curl fails, log it but continue
+      # If curl fails, try to check if collection exists by listing all collections
       if [ $((elapsed % 10)) -eq 0 ]; then
-        log_warn "⚠️ Could not query collection status (pod may still be starting)"
+        log_warn "⚠️ Could not query collection status, checking if collection exists..."
+        local collections_list=$(kubectl exec -n "${namespace}" "${pod}" -- \
+          timeout 5 curl -s "http://localhost:6333/collections" 2>/dev/null || echo "")
+        if echo "${collections_list}" | grep -q "${collection_name}"; then
+          log_info "Collection ${collection_name} exists in Qdrant, but status query failed"
+        else
+          log_info "Collection ${collection_name} not found in Qdrant yet"
+        fi
       fi
     fi
 
@@ -182,17 +207,21 @@ wait_for_collection_green() {
   log_error "Collection ${collection_name} did not become green within timeout"
   log_info "Diagnostics:"
   log_info "  Last status: ${last_status:-unknown}"
+  log_info "  Last response: ${last_response:-none}"
   log_info "  Collection CRD:"
   kubectl get qdrantcollections "${collection_name}" -n "${namespace}" -o yaml 2>/dev/null | head -30 || true
   log_info "  Qdrant pod status:"
   kubectl get pod "${pod}" -n "${namespace}" -o yaml 2>/dev/null | grep -A 10 "status:" || true
   log_info "  Attempting to get collection info from Qdrant:"
   kubectl exec -n "${namespace}" "${pod}" -- \
-    curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || log_warn "  Failed to query Qdrant API"
-  log_info "  Operator logs (last 30 lines):"
+    timeout 5 curl -s "http://localhost:6333/collections/${collection_name}" 2>/dev/null || log_warn "  Failed to query Qdrant API"
+  log_info "  Listing all collections in Qdrant:"
+  kubectl exec -n "${namespace}" "${pod}" -- \
+    timeout 5 curl -s "http://localhost:6333/collections" 2>/dev/null | head -20 || log_warn "  Failed to list collections"
+  log_info "  Operator logs (last 50 lines, filtered for collection):"
   OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
   if [ -n "${OPERATOR_POD}" ]; then
-    kubectl logs -n qdrant-operator "${OPERATOR_POD}" --tail=30 2>/dev/null | grep -i "collection\|${collection_name}" || true
+    kubectl logs -n qdrant-operator "${OPERATOR_POD}" --tail=50 2>/dev/null | grep -i "collection\|${collection_name}" || log_warn "  No collection-related logs found"
   fi
   return 1
 }

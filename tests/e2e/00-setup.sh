@@ -21,6 +21,11 @@ kubectl rollout status statefulset my-cluster -n default --timeout=120s || {
   exit 1
 }
 
+log_info "Cleaning up any existing collection (if present)..."
+kubectl delete qdrantcollections my-collection -n default --ignore-not-found=true 2>/dev/null || true
+# Wait a bit for cleanup to complete
+sleep 3
+
 log_info "Creating Qdrant collection..."
 kubectl apply -f "${SCRIPT_DIR}/../../examples/qdrant-collection-minimal.yaml"
 
