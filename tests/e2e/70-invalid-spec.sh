@@ -84,12 +84,23 @@ spec:
   replicationFactor: 1
 EOF
 
-log_info "Waiting for operator to process invalid collection spec (timeout: 30s)..."
+log_info "Waiting for operator to process invalid collection spec (timeout: 60s)..."
 # Wait for resource to be created first
 wait_for_resource "qdrantcollections" "invalid-vector-collection" "default" 30
 
-# Wait for operator to set error status
-wait_for_status "qdrantcollections" "invalid-vector-collection" "{.status.qdrantStatus}" "Error" "default" 30
+# Wait for operator to set error status (give more time for reconciliation)
+log_info "Waiting for operator to detect invalid spec and set Error status..."
+wait_for_status "qdrantcollections" "invalid-vector-collection" "{.status.qdrantStatus}" "Error" "default" 60 || {
+  log_error "Collection status did not become 'Error' within timeout"
+  log_info "Current collection status:"
+  kubectl get qdrantcollections invalid-vector-collection -n default -o yaml
+  log_info "Checking operator logs for collection processing:"
+  OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${OPERATOR_POD}" ]; then
+    kubectl logs -n qdrant-operator "${OPERATOR_POD}" --tail=50 2>/dev/null | grep -i "invalid-vector-collection\|validation\|error" || true
+  fi
+  exit 1
+}
 
 # Give operator a moment to set errorMessage (may take a bit longer)
 log_info "Waiting for errorMessage to be set (if available)..."
