@@ -52,6 +52,20 @@ export const onEventCluster = async (phase, apiObj) => {
         log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
         await setErrorStatus(apiObj, validationError, 'cluster', 'InvalidSpec');
         errorsTotal.inc({ type: 'validation' });
+
+        // 🔒 CRITICAL: Update cache with Error status to prevent reconcile from being scheduled
+        // This ensures that even if reconcile is scheduled elsewhere (reconnect, initial listing),
+        // the guard clause in reconcileCluster will catch it
+        clusterCache.set(resourceKey, {
+          ...apiObj,
+          status: {
+            ...apiObj.status,
+            qdrantStatus: 'Error',
+            reason: 'InvalidSpec',
+            errorMessage: validationError
+          }
+        });
+
         // Update resourceVersion to prevent duplicate processing
         lastClusterResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
         endTimer();

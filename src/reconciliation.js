@@ -187,13 +187,41 @@ export const reconcileCluster = async (apiObj) => {
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
 
+  // 🔒 CRITICAL: Refetch object from API to ensure we have the latest status
+  // This is essential because:
+  // 1. The apiObj passed to reconcile may be stale (from cache or event)
+  // 2. setErrorStatus() writes Error status, but reconcile may have been scheduled before that write completes
+  // 3. Without refetch, we might not see the Error status and will overwrite it
+  let latestObj = apiObj;
+  try {
+    const fetched = await k8sCustomApi.getNamespacedCustomObject({
+      group: 'qdrant.operator',
+      version: 'v1alpha1',
+      namespace: namespace,
+      plural: 'qdrantclusters',
+      name: name
+    });
+    latestObj = fetched;
+    // Update cache with latest object
+    clusterCache.set(resourceKey, latestObj);
+  } catch (err) {
+    log(
+      `⚠️ Error fetching latest cluster object for "${name}": ${err.message}. Using provided object.`
+    );
+    // Continue with provided object if fetch fails (shouldn't happen, but defensive)
+  }
+
   // 🔒 Terminal state guard: if already in InvalidSpec Error state, skip reconciliation
   // This prevents concurrent reconciles from overwriting the Error status
   // Spec inválida é terminal e sticky - nenhum outro reconcile pode limpar ou ignorar isso
-  if (apiObj.status?.qdrantStatus === 'Error' && apiObj.status?.reason === 'InvalidSpec') {
+  // MUST check after refetch to see the Error status written by setErrorStatus()
+  if (latestObj.status?.qdrantStatus === 'Error' && latestObj.status?.reason === 'InvalidSpec') {
     log(`⏭️ Cluster "${name}" is in InvalidSpec Error state, skipping reconciliation`);
     return;
   }
+
+  // Use latest object for the rest of reconciliation
+  apiObj = latestObj;
 
   // ✅ Always validate spec (allows recovery when spec is fixed)
   const desired = apiObj.spec;
@@ -202,6 +230,19 @@ export const reconcileCluster = async (apiObj) => {
     log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
     await setErrorStatus(apiObj, validationError, 'cluster', 'InvalidSpec');
     errorsTotal.inc({ type: 'validation' });
+
+    // 🔒 CRITICAL: Update cache with Error status to prevent future reconciles
+    // This ensures that even if reconcile is scheduled again, the guard clause will catch it
+    clusterCache.set(resourceKey, {
+      ...apiObj,
+      status: {
+        ...apiObj.status,
+        qdrantStatus: 'Error',
+        reason: 'InvalidSpec',
+        errorMessage: validationError
+      }
+    });
+
     // Don't requeue - spec error is terminal, user must fix the spec
     return;
   }
