@@ -148,7 +148,7 @@ export const scheduleApplying = (apiObj) => {
 };
 
 // Validate cluster spec
-const validateClusterSpec = (spec) => {
+export const validateClusterSpec = (spec) => {
   if (!spec) {
     return 'Spec is required';
   }
@@ -162,7 +162,7 @@ const validateClusterSpec = (spec) => {
 };
 
 // Validate collection spec
-const validateCollectionSpec = (spec) => {
+export const validateCollectionSpec = (spec) => {
   if (!spec) {
     return 'Spec is required';
   }

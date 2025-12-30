@@ -10,9 +10,15 @@ import {
 } from './state.js';
 import { addFinalizer, removeFinalizer } from './finalizers.js';
 import { cleanupCluster, cleanupCollection } from './cleanup.js';
-import { scheduleReconcile, reconcileCollection, reconcileRestore } from './reconciliation.js';
+import {
+  scheduleReconcile,
+  reconcileCollection,
+  validateClusterSpec,
+  validateCollectionSpec
+} from './reconciliation.js';
 import { reconcileTotal, reconcileDuration, errorsTotal, reconcileQueueDepth } from './metrics.js';
 import { deleteCollection } from './collection-ops.js';
+import { setErrorStatus } from './status.js';
 import { log } from './utils.js';
 
 // React on QdrantClusters events
@@ -101,6 +107,21 @@ export const onEventCluster = async (phase, apiObj) => {
 
     // Ensure finalizer is present
     await addFinalizer(apiObj, 'qdrantclusters');
+
+    // CRITICAL: Validate spec BEFORE scheduling reconcile
+    // InvalidSpec is an admission logic error, not a reconciliation error
+    // It must be detected at event time, before any side effects
+    // This ensures status Error is written immediately, without depending on reconcile
+    if (['ADDED', 'MODIFIED'].includes(phase)) {
+      const validationError = validateClusterSpec(apiObj.spec);
+      if (validationError) {
+        log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
+        await setErrorStatus(apiObj, validationError, 'cluster', 'InvalidSpec');
+        errorsTotal.inc({ type: 'validation' });
+        endTimer();
+        return; // Don't schedule reconcile for invalid specs
+      }
+    }
 
     // Enqueue reconciliation (declarative model)
     if (['ADDED', 'MODIFIED'].includes(phase)) {
@@ -203,6 +224,21 @@ export const onEventCollection = async (phase, apiObj) => {
       log(`❌ Error adding finalizer to collection "${name}": ${finalizerErr.message}`);
       // Continue anyway - reconciliation can proceed without finalizer initially
       // Finalizer will be added on next event or periodic reconciliation
+    }
+
+    // CRITICAL: Validate spec BEFORE scheduling reconcile
+    // InvalidSpec is an admission logic error, not a reconciliation error
+    // It must be detected at event time, before any side effects
+    // This ensures status Error is written immediately, without depending on reconcile
+    if (['ADDED', 'MODIFIED'].includes(phase)) {
+      const validationError = validateCollectionSpec(apiObj.spec);
+      if (validationError) {
+        log(`❌ Invalid spec for collection "${name}": ${validationError}`);
+        await setErrorStatus(apiObj, validationError, 'collection', 'InvalidSpec');
+        errorsTotal.inc({ type: 'validation' });
+        endTimer();
+        return; // Don't schedule reconcile for invalid specs
+      }
     }
 
     // Enqueue reconciliation (declarative model)
