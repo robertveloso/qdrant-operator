@@ -274,7 +274,12 @@ export const setErrorStatus = async (
         namespace,
         plural,
         name,
-        { status: statusPatch },
+        {
+          metadata: {
+            name: name
+          },
+          status: statusPatch
+        },
         undefined,
         undefined,
         undefined,
