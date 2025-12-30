@@ -112,6 +112,17 @@ export const setStatusWithPhase = async (
   const resourceKey = `${namespace}/${name}`;
   settingStatus.set(resourceKey, 'update');
 
+  // 🔍 FORENSIC LOGGING: Capture state BEFORE write
+  const rvBefore = apiObj.metadata.resourceVersion;
+  const generation = apiObj.metadata.generation;
+  const reconcileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  log(
+    `[STATUS][WRITE][START] ${resourceType}="${name}" phase=${phase} reconcileId=${reconcileId}\n` +
+      `  generation=${generation}\n` +
+      `  rv(before)=${rvBefore || 'none'}`
+  );
+
   const maxRetries = 3;
   let retries = 0;
 
@@ -140,7 +151,7 @@ export const setStatusWithPhase = async (
         }
       };
 
-      await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+      const res = await k8sCustomApi.replaceNamespacedCustomObjectStatus({
         group: 'qdrant.operator',
         version: 'v1alpha1',
         namespace: namespace,
@@ -148,6 +159,38 @@ export const setStatusWithPhase = async (
         name: name,
         body: newStatus
       });
+
+      // 🔍 FORENSIC LOGGING: Log HTTP response
+      const statusCode = res?.response?.statusCode;
+      log(
+        `[STATUS][WRITE][RESPONSE] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+          `  statusCode=${statusCode || 'unknown'}`
+      );
+
+      // 🔍 FORENSIC LOGGING: READ-AFTER-WRITE to verify persistence
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const verify = await k8sCustomApi.getNamespacedCustomObjectStatus({
+          group: 'qdrant.operator',
+          version: 'v1alpha1',
+          namespace: namespace,
+          plural: plural,
+          name: name
+        });
+
+        const rvAfter = verify.metadata?.resourceVersion;
+        const statusAfter = verify.status || {};
+        log(
+          `[STATUS][VERIFY] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+            `  rv(before)=${rvBefore || 'none'} → rv(after)=${rvAfter || 'none'}\n` +
+            `  qdrantStatus=${statusAfter.qdrantStatus || 'none'}`
+        );
+      } catch (verifyErr) {
+        log(
+          `[STATUS][VERIFY][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Could not verify: ${verifyErr.message}`
+        );
+      }
+
       log(`The ${resourceType} "${name}" status now is ${phase}.`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
 
@@ -174,17 +217,32 @@ export const setStatusWithPhase = async (
       return;
     } catch (err) {
       const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
+      const errorBody = err.body || err.message;
+
+      // 🔍 FORENSIC LOGGING: Log error details
+      log(
+        `[STATUS][WRITE][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} attempt=${retries + 1}\n` +
+          `  errorCode=${errorCode || 'unknown'}\n` +
+          `  errorMessage=${err.message || 'unknown'}`
+      );
+
       if (errorCode === 409 || (err.message && err.message.includes('Conflict'))) {
         retries++;
         if (retries < maxRetries) {
-          log(`Status update conflict for "${name}", retrying (${retries}/${maxRetries})...`);
+          log(
+            `[STATUS][WRITE][RETRY] ${resourceType}="${name}" reconcileId=${reconcileId} - Conflict, retrying (${retries}/${maxRetries})...`
+          );
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));
           continue;
         } else {
-          log(`Failed to update status for "${name}" after ${maxRetries} retries: ${err.message}`);
+          log(
+            `[STATUS][WRITE][FAILED] ${resourceType}="${name}" reconcileId=${reconcileId} - Failed after ${maxRetries} retries: ${err.message}`
+          );
         }
       } else {
-        log(`Error updating status for "${name}": ${err.message}`);
+        log(
+          `[STATUS][WRITE][FAILED] ${resourceType}="${name}" reconcileId=${reconcileId} - Non-retryable error: ${err.message}`
+        );
         setTimeout(() => settingStatus.delete(resourceKey), 300);
         return;
       }
@@ -242,6 +300,18 @@ export const setErrorStatus = async (
 
   const plural = resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
 
+  // 🔍 FORENSIC LOGGING: Capture state BEFORE write
+  const rvBefore = apiObj.metadata.resourceVersion;
+  const generation = apiObj.metadata.generation;
+  const reconcileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  log(
+    `[STATUS][WRITE][START] ${resourceType}="${name}" reason=${reason} reconcileId=${reconcileId}\n` +
+      `  generation=${generation}\n` +
+      `  rv(before)=${rvBefore || 'none'}\n` +
+      `  errorMessage="${errorMessage}"`
+  );
+
   // Build status patch using the object we received (no cache lookup needed)
   // observedGeneration tracks which spec generation was observed (never use resourceVersion as fallback)
   // Always include observedGeneration when available - this allows kubectl/UI to know if status matches current spec
@@ -274,8 +344,11 @@ export const setErrorStatus = async (
       status: statusPatch
     };
 
-    // Log the payload being sent (essential for debugging)
-    log(`📤 PATCH ${plural}/${name} (InvalidSpec) payload:\n${JSON.stringify(patchBody, null, 2)}`);
+    // 🔍 FORENSIC LOGGING: Log exact payload being sent
+    log(
+      `[STATUS][WRITE][PAYLOAD] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+        `${JSON.stringify(patchBody, null, 2)}`
+    );
 
     try {
       const res = await k8sCustomApi.patchNamespacedCustomObject(
@@ -293,19 +366,82 @@ export const setErrorStatus = async (
         }
       );
 
-      // Log successful response details
-      if (res?.response?.statusCode) {
+      // 🔍 FORENSIC LOGGING: Log HTTP response details
+      const statusCode = res?.response?.statusCode;
+      const headers = res?.response?.headers || {};
+      const body = res?.body || res;
+
+      log(
+        `[STATUS][WRITE][RESPONSE] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+          `  statusCode=${statusCode || 'unknown'}\n` +
+          `  headers=${JSON.stringify(headers)}\n` +
+          `  bodyKeys=${body ? Object.keys(body).join(',') : 'none'}`
+      );
+
+      if (!statusCode || statusCode < 200 || statusCode >= 300) {
         log(
-          `✅ InvalidSpec status patch applied for ${resourceType} "${name}" (statusCode: ${res.response.statusCode})`
+          `[STATUS][WRITE][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Invalid statusCode: ${statusCode}`
         );
-      } else {
-        log(`✅ InvalidSpec status patch applied for ${resourceType} "${name}"`);
+        setTimeout(() => settingStatus.delete(resourceKey), 300);
+        return;
+      }
+
+      // 🔍 FORENSIC LOGGING: READ-AFTER-WRITE to verify persistence
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay for eventual consistency
+        const verify = await k8sCustomApi.getNamespacedCustomObject({
+          group: 'qdrant.operator',
+          version: 'v1alpha1',
+          namespace: namespace,
+          plural: plural,
+          name: name
+        });
+
+        const rvAfter = verify.metadata?.resourceVersion;
+        const statusAfter = verify.status || {};
+        const qdrantStatusAfter = statusAfter.qdrantStatus;
+        const reasonAfter = statusAfter.reason;
+
+        log(
+          `[STATUS][VERIFY] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+            `  rv(before)=${rvBefore || 'none'} → rv(after)=${rvAfter || 'none'}\n` +
+            `  qdrantStatus=${qdrantStatusAfter || 'none'}\n` +
+            `  reason=${reasonAfter || 'none'}\n` +
+            `  errorMessage="${statusAfter.errorMessage || 'none'}"\n` +
+            `  statusFull=${JSON.stringify(statusAfter, null, 2)}`
+        );
+
+        if (qdrantStatusAfter !== 'Error' || reasonAfter !== reason) {
+          log(
+            `[STATUS][VERIFY][FAILED] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+              `  Expected: qdrantStatus=Error, reason=${reason}\n` +
+              `  Actual: qdrantStatus=${qdrantStatusAfter}, reason=${reasonAfter}\n` +
+              `  ⚠️ STATUS WAS NOT PERSISTED CORRECTLY`
+          );
+        } else {
+          log(
+            `[STATUS][VERIFY][SUCCESS] ${resourceType}="${name}" reconcileId=${reconcileId} - Status persisted correctly`
+          );
+        }
+      } catch (verifyErr) {
+        log(
+          `[STATUS][VERIFY][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Could not verify: ${verifyErr.message}`
+        );
       }
 
       log(`Set InvalidSpec error for ${resourceType} "${name}": ${errorMessage}`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     } catch (patchErr) {
+      // 🔍 FORENSIC LOGGING: Log full error details
+      const errorCode = patchErr.statusCode || patchErr.code;
+      const errorBody = patchErr.body || patchErr.message;
+      log(
+        `[STATUS][WRITE][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+          `  errorCode=${errorCode || 'unknown'}\n` +
+          `  errorMessage=${patchErr.message || 'unknown'}\n` +
+          `  errorBody=${typeof errorBody === 'string' ? errorBody : JSON.stringify(errorBody)}`
+      );
       logK8sError(patchErr, `patch InvalidSpec status for ${resourceType} "${name}"`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
@@ -316,9 +452,10 @@ export const setErrorStatus = async (
   // Retry with exponential backoff for 404 (eventual consistency - /status may not exist yet for newly created CRs)
   const patchBody = { status: statusPatch };
 
-  // Log the payload being sent (essential for debugging)
+  // 🔍 FORENSIC LOGGING: Log exact payload being sent
   log(
-    `📤 PATCH ${plural}/${name}/status (reason: ${reason}) payload:\n${JSON.stringify(patchBody, null, 2)}`
+    `[STATUS][WRITE][PAYLOAD] ${resourceType}="${name}" reconcileId=${reconcileId} (via /status subresource)\n` +
+      `${JSON.stringify(patchBody, null, 2)}`
   );
 
   const patchStatus = async () => {
@@ -343,13 +480,66 @@ export const setErrorStatus = async (
     try {
       const res = await patchStatus();
 
-      // Log successful response details
-      if (res?.response?.statusCode) {
+      // 🔍 FORENSIC LOGGING: Log HTTP response details
+      const statusCode = res?.response?.statusCode;
+      const headers = res?.response?.headers || {};
+      const body = res?.body || res;
+
+      log(
+        `[STATUS][WRITE][RESPONSE] ${resourceType}="${name}" reconcileId=${reconcileId} attempt=${i + 1}\n` +
+          `  statusCode=${statusCode || 'unknown'}\n` +
+          `  headers=${JSON.stringify(headers)}\n` +
+          `  bodyKeys=${body ? Object.keys(body).join(',') : 'none'}`
+      );
+
+      if (!statusCode || statusCode < 200 || statusCode >= 300) {
         log(
-          `✅ Status patch applied for ${resourceType} "${name}" (statusCode: ${res.response.statusCode}, reason: ${reason})`
+          `[STATUS][WRITE][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Invalid statusCode: ${statusCode}`
         );
-      } else {
-        log(`✅ Status patch applied for ${resourceType} "${name}" (reason: ${reason})`);
+        continue; // Will retry if not last attempt
+      }
+
+      // 🔍 FORENSIC LOGGING: READ-AFTER-WRITE to verify persistence
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay for eventual consistency
+        const verify = await k8sCustomApi.getNamespacedCustomObjectStatus({
+          group: 'qdrant.operator',
+          version: 'v1alpha1',
+          namespace: namespace,
+          plural: plural,
+          name: name
+        });
+
+        const rvAfter = verify.metadata?.resourceVersion;
+        const statusAfter = verify.status || {};
+        const qdrantStatusAfter = statusAfter.qdrantStatus;
+        const reasonAfter = statusAfter.reason;
+
+        log(
+          `[STATUS][VERIFY] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+            `  rv(before)=${rvBefore || 'none'} → rv(after)=${rvAfter || 'none'}\n` +
+            `  qdrantStatus=${qdrantStatusAfter || 'none'}\n` +
+            `  reason=${reasonAfter || 'none'}\n` +
+            `  errorMessage="${statusAfter.errorMessage || 'none'}"\n` +
+            `  statusFull=${JSON.stringify(statusAfter, null, 2)}`
+        );
+
+        if (qdrantStatusAfter !== 'Error' || reasonAfter !== reason) {
+          log(
+            `[STATUS][VERIFY][FAILED] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+              `  Expected: qdrantStatus=Error, reason=${reason}\n` +
+              `  Actual: qdrantStatus=${qdrantStatusAfter}, reason=${reasonAfter}\n` +
+              `  ⚠️ STATUS WAS NOT PERSISTED CORRECTLY`
+          );
+        } else {
+          log(
+            `[STATUS][VERIFY][SUCCESS] ${resourceType}="${name}" reconcileId=${reconcileId} - Status persisted correctly`
+          );
+        }
+      } catch (verifyErr) {
+        log(
+          `[STATUS][VERIFY][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Could not verify: ${verifyErr.message}`
+        );
       }
 
       log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
@@ -357,20 +547,29 @@ export const setErrorStatus = async (
       return;
     } catch (err) {
       const errorCode = err.statusCode || err.code || (err.body && JSON.parse(err.body)?.code);
+      const errorBody = err.body || err.message;
+
+      // 🔍 FORENSIC LOGGING: Log full error details
+      log(
+        `[STATUS][WRITE][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} attempt=${i + 1}\n` +
+          `  errorCode=${errorCode || 'unknown'}\n` +
+          `  errorMessage=${err.message || 'unknown'}\n` +
+          `  errorBody=${typeof errorBody === 'string' ? errorBody : JSON.stringify(errorBody)}`
+      );
 
       // Handle 404 (Not Found) - /status subresource may not exist yet (eventual consistency)
       if (errorCode === 404) {
         if (i < MAX_RETRIES - 1) {
           const delay = 200 * (i + 1);
           log(
-            `Status endpoint not available yet for "${name}", retrying in ${delay}ms (attempt ${i + 1}/${MAX_RETRIES})...`
+            `[STATUS][WRITE][RETRY] ${resourceType}="${name}" reconcileId=${reconcileId} - Status endpoint not available yet, retrying in ${delay}ms (attempt ${i + 1}/${MAX_RETRIES})...`
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         } else {
           logK8sError(err, `patch status for ${resourceType} "${name}" (final retry failed)`);
           log(
-            `⚠️ Failed to set error status for "${name}" after ${MAX_RETRIES} retries (status endpoint may not be available yet). Error: ${errorMessage}`
+            `[STATUS][WRITE][FAILED] ${resourceType}="${name}" reconcileId=${reconcileId} - Failed after ${MAX_RETRIES} retries (status endpoint may not be available yet). Error: ${errorMessage}`
           );
           setTimeout(() => settingStatus.delete(resourceKey), 300);
           return;
@@ -381,7 +580,9 @@ export const setErrorStatus = async (
       if (errorCode === 409) {
         // For conflicts, try replace as fallback (requires getting current resource)
         try {
-          log(`🔄 409 Conflict for "${name}", attempting replace as fallback...`);
+          log(
+            `[STATUS][WRITE][CONFLICT] ${resourceType}="${name}" reconcileId=${reconcileId} - 409 Conflict, attempting replace as fallback...`
+          );
           const resCurrent = await k8sCustomApi.getNamespacedCustomObjectStatus({
             group: 'qdrant.operator',
             version: 'v1alpha1',
@@ -412,12 +613,35 @@ export const setErrorStatus = async (
             body: newStatus
           });
 
-          if (replaceRes?.response?.statusCode) {
+          const replaceStatusCode = replaceRes?.response?.statusCode;
+          log(
+            `[STATUS][WRITE][REPLACE] ${resourceType}="${name}" reconcileId=${reconcileId}\n` +
+              `  statusCode=${replaceStatusCode || 'unknown'}`
+          );
+
+          // 🔍 FORENSIC LOGGING: READ-AFTER-WRITE for replace
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const verify = await k8sCustomApi.getNamespacedCustomObjectStatus({
+              group: 'qdrant.operator',
+              version: 'v1alpha1',
+              namespace: namespace,
+              plural: plural,
+              name: name
+            });
+
+            const rvAfter = verify.metadata?.resourceVersion;
+            const statusAfter = verify.status || {};
             log(
-              `✅ Status replace applied for ${resourceType} "${name}" (statusCode: ${replaceRes.response.statusCode}, reason: ${reason})`
+              `[STATUS][VERIFY] ${resourceType}="${name}" reconcileId=${reconcileId} (after replace)\n` +
+                `  rv(before)=${rvBefore || 'none'} → rv(after)=${rvAfter || 'none'}\n` +
+                `  qdrantStatus=${statusAfter.qdrantStatus || 'none'}\n` +
+                `  reason=${statusAfter.reason || 'none'}`
             );
-          } else {
-            log(`✅ Status replace applied for ${resourceType} "${name}" (reason: ${reason})`);
+          } catch (verifyErr) {
+            log(
+              `[STATUS][VERIFY][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Could not verify after replace: ${verifyErr.message}`
+            );
           }
 
           log(
@@ -426,6 +650,9 @@ export const setErrorStatus = async (
           setTimeout(() => settingStatus.delete(resourceKey), 300);
           return;
         } catch (replaceErr) {
+          log(
+            `[STATUS][WRITE][REPLACE][ERROR] ${resourceType}="${name}" reconcileId=${reconcileId} - Replace failed: ${replaceErr.message}`
+          );
           logK8sError(replaceErr, `replace status for ${resourceType} "${name}" (409 fallback)`);
           setTimeout(() => settingStatus.delete(resourceKey), 300);
           return;
@@ -433,6 +660,9 @@ export const setErrorStatus = async (
       }
 
       // Other errors (403 RBAC, 500 server error, etc.) - don't retry, log with full details
+      log(
+        `[STATUS][WRITE][FAILED] ${resourceType}="${name}" reconcileId=${reconcileId} - Non-retryable error: ${errorCode}`
+      );
       logK8sError(err, `patch status for ${resourceType} "${name}" (reason: ${reason})`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
