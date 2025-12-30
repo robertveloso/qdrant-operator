@@ -2,6 +2,19 @@ import { k8sCustomApi } from './k8s-client.js';
 import { settingStatus, pendingEvents } from './state.js';
 import { log } from './utils.js';
 
+/**
+ * Status Update Lock System
+ *
+ * During status updates, we use settingStatus as a lock to prevent concurrent reconciles.
+ * Events that occur during status updates are queued in pendingEvents and processed after
+ * the status update completes. This prevents:
+ * - Race conditions on status updates
+ * - Lost events during status update windows
+ * - Concurrent reconciles modifying the same resource
+ *
+ * See state.js for more details on settingStatus and pendingEvents.
+ */
+
 // Set cleanup status with phase and attempt count (for retry tracking)
 export const setCleanupStatus = async (apiObj, phase, attempt = null, error = null) => {
   const name = apiObj.metadata.name;
@@ -230,11 +243,21 @@ export const setErrorStatus = async (
   const plural = resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
 
   // Build status patch using the object we received (no cache lookup needed)
+  // observedGeneration tracks which spec generation was observed (never use resourceVersion as fallback)
   const statusPatch = {
     qdrantStatus: 'Error',
     errorMessage: errorMessage,
     reason: reason,
-    observedGeneration: apiObj.metadata.generation || apiObj.metadata.resourceVersion
+    ...(apiObj.metadata.generation && { observedGeneration: apiObj.metadata.generation }),
+    conditions: [
+      {
+        type: 'Ready',
+        status: 'False',
+        reason: reason,
+        message: errorMessage,
+        lastTransitionTime: new Date().toISOString()
+      }
+    ]
   };
 
   // Try patch first (most efficient, works even if resource just created)

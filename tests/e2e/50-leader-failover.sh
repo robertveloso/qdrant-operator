@@ -26,25 +26,37 @@ kubectl wait --for=condition=ready pod -l app=qdrant-operator -n qdrant-operator
   exit 1
 }
 
-log_info "Waiting for new leader to be elected (timeout: 30s)..."
-timeout=30
+log_info "Waiting for new leader to be elected (timeout: 60s)..."
+timeout=60
 elapsed=0
 NEW_POD=""
 
 while [ $elapsed -lt $timeout ]; do
   NEW_POD=$(get_operator_pod)
 
-  if [ -n "${NEW_POD}" ] && is_operator_leader "${NEW_POD}"; then
+  if [ -z "${NEW_POD}" ]; then
+    log_info "No operator pod found yet, waiting... (${elapsed}s/${timeout}s)"
+    sleep 2
+    elapsed=$((elapsed + 2))
+    continue
+  fi
+
+  if is_operator_leader "${NEW_POD}"; then
     log_info "✅ New leader elected: ${NEW_POD}"
     exit 0
   fi
 
-  log_info "Waiting for leader election... (${elapsed}s/${timeout}s)"
-  sleep 5
-  elapsed=$((elapsed + 5))
+  log_info "Waiting for leader election... (pod: ${NEW_POD}, ${elapsed}s/${timeout}s)"
+  sleep 2
+  elapsed=$((elapsed + 2))
 done
 
 log_error "New leader not elected within timeout"
+log_info "Current operator pod: ${NEW_POD:-none}"
+log_info "Operator pods:"
+kubectl get pods -n qdrant-operator -l app=qdrant-operator || true
+log_info "Lease status:"
+kubectl get lease qdrant-operator -n qdrant-operator -o yaml || true
 log_info "Operator logs:"
 kubectl logs -n qdrant-operator deploy/qdrant-operator --tail=50 || true
 exit 1

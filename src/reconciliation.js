@@ -30,19 +30,34 @@ import { errorsTotal, driftDetectedTotal, reconcileQueueDepth } from './metrics.
 import { log } from './utils.js';
 
 // Schedule retry with persistent queue (survives reconnections)
+// MAX_RETRIES: Maximum number of retry attempts before giving up (prevents infinite loops)
+const MAX_RETRIES = 20;
+
 const scheduleRetry = (apiObj, resourceType, delay = 5000, retryCount = 0) => {
   const resourceKey = `${apiObj.metadata.namespace}/${apiObj.metadata.name}`;
   const retryKey = `retry-${resourceKey}`;
 
-  // Cancel existing retry if any
+  // Get existing retry count if retry already scheduled (preserve retry count across calls)
+  let currentRetryCount = retryCount;
   if (retryQueue.has(retryKey)) {
-    clearTimeout(retryQueue.get(retryKey).timeoutId);
+    const existingRetry = retryQueue.get(retryKey);
+    currentRetryCount = existingRetry.retryCount; // Use existing retry count
+    clearTimeout(existingRetry.timeoutId);
+  }
+
+  // Check if we've exceeded max retries
+  if (currentRetryCount >= MAX_RETRIES) {
+    log(
+      `⚠️ Max retries (${MAX_RETRIES}) reached for ${resourceType} "${apiObj.metadata.name}". Stopping retry attempts.`
+    );
+    retryQueue.delete(retryKey);
+    return;
   }
 
   const timeoutId = setTimeout(() => {
     retryQueue.delete(retryKey);
     log(
-      `🔄 Executing retry for ${resourceType} "${apiObj.metadata.name}" (attempt ${retryCount + 1})...`
+      `🔄 Executing retry for ${resourceType} "${apiObj.metadata.name}" (attempt ${currentRetryCount + 1}/${MAX_RETRIES})...`
     );
     scheduleReconcile(apiObj, resourceType);
   }, delay);
@@ -50,13 +65,13 @@ const scheduleRetry = (apiObj, resourceType, delay = 5000, retryCount = 0) => {
   retryQueue.set(retryKey, {
     apiObj,
     resourceType,
-    retryCount: retryCount + 1,
+    retryCount: currentRetryCount + 1,
     scheduledAt: Date.now(),
     timeoutId
   });
 
   log(
-    `⏰ Scheduled retry for ${resourceType} "${apiObj.metadata.name}" in ${delay / 1000}s (queue size: ${retryQueue.size})`
+    `⏰ Scheduled retry for ${resourceType} "${apiObj.metadata.name}" in ${delay / 1000}s (attempt ${currentRetryCount + 1}/${MAX_RETRIES}, queue size: ${retryQueue.size})`
   );
 };
 

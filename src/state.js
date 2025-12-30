@@ -5,6 +5,12 @@
 export const applyQueue = new Map();
 
 // Track resources currently updating status (to avoid duplicate updates)
+// IMPORTANT: This acts as a mini lock system to prevent concurrent reconciles during status updates.
+// When a status update is in progress, events are queued in pendingEvents to avoid:
+// - Race conditions on status updates
+// - Lost events during status update windows
+// - Concurrent reconciles modifying the same resource
+// See status.js for how pendingEvents are processed after status updates complete.
 export const settingStatus = new Map();
 
 // Per-resource resourceVersion tracking (key: namespace/name)
