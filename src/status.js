@@ -261,18 +261,42 @@ export const setErrorStatus = async (apiObj, errorMessage, resourceType = 'clust
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     } catch (err) {
-      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body).code);
-      if (errorCode === 409 || (err.message && err.message.includes('Conflict'))) {
+      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body)?.code);
+      const errorMessage = err.message || '';
+      const errorBody = err.body || '';
+
+      // Handle 404 (Not Found) - resource may not be fully created yet
+      if (errorCode === 404 || errorMessage.includes('not found') || errorBody.includes('NotFound')) {
         retries++;
         if (retries < maxRetries) {
+          log(`Resource "${name}" not found yet, retrying status update (${retries}/${maxRetries})...`);
+          await new Promise((resolve) => setTimeout(resolve, 200 * retries)); // Wait longer for 404
+          continue;
+        } else {
+          log(`Failed to set error status for "${name}" after ${maxRetries} retries: resource not found`);
+          setTimeout(() => settingStatus.delete(resourceKey), 300);
+          return;
+        }
+      }
+
+      // Handle 409 (Conflict) - resource version conflict
+      if (errorCode === 409 || errorMessage.includes('Conflict')) {
+        retries++;
+        if (retries < maxRetries) {
+          log(`Status update conflict for "${name}", retrying (${retries}/${maxRetries})...`);
           await new Promise((resolve) => setTimeout(resolve, 100 * retries));
           continue;
+        } else {
+          log(`Failed to set error status for "${name}" after ${maxRetries} retries: conflict`);
+          setTimeout(() => settingStatus.delete(resourceKey), 300);
+          return;
         }
-      } else {
-        log(`Error setting error status for "${name}": ${err.message}`);
-        setTimeout(() => settingStatus.delete(resourceKey), 300);
-        return;
       }
+
+      // Other errors
+      log(`Error setting error status for "${name}": ${err.message}`);
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
     }
   }
   setTimeout(() => settingStatus.delete(resourceKey), 300);
