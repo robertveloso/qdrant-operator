@@ -266,14 +266,22 @@ export const setErrorStatus = async (apiObj, errorMessage, resourceType = 'clust
       const errorBody = err.body || '';
 
       // Handle 404 (Not Found) - resource may not be fully created yet
-      if (errorCode === 404 || errorMessage.includes('not found') || errorBody.includes('NotFound')) {
+      if (
+        errorCode === 404 ||
+        errorMessage.includes('not found') ||
+        errorBody.includes('NotFound')
+      ) {
         retries++;
         if (retries < maxRetries) {
-          log(`Resource "${name}" not found yet, retrying status update (${retries}/${maxRetries})...`);
+          log(
+            `Resource "${name}" not found yet, retrying status update (${retries}/${maxRetries})...`
+          );
           await new Promise((resolve) => setTimeout(resolve, 200 * retries)); // Wait longer for 404
           continue;
         } else {
-          log(`Failed to set error status for "${name}" after ${maxRetries} retries: resource not found`);
+          log(
+            `Failed to set error status for "${name}" after ${maxRetries} retries: resource not found`
+          );
           setTimeout(() => settingStatus.delete(resourceKey), 300);
           return;
         }
