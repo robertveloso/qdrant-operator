@@ -261,41 +261,11 @@ export const setErrorStatus = async (
     ]
   };
 
-  // CRITICAL: For InvalidSpec errors (first reconcile), use patch on the object itself,
-  // not on /status subresource, because /status may not exist yet for newly created CRs.
-  // Kubernetes allows patching status in the main object even when /status subresource doesn't exist.
-  // For other errors (after first reconcile), /status subresource is safe to use.
-  const isSpecError = reason === 'InvalidSpec';
-
-  if (isSpecError) {
-    // Patch the object directly (works even when /status subresource doesn't exist yet)
-    try {
-      await k8sCustomApi.patchNamespacedCustomObject(
-        'qdrant.operator',
-        'v1alpha1',
-        namespace,
-        plural,
-        name,
-        { status: statusPatch },
-        undefined,
-        undefined,
-        undefined,
-        {
-          headers: { 'Content-Type': 'application/merge-patch+json' }
-        }
-      );
-      log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
-      setTimeout(() => settingStatus.delete(resourceKey), 300);
-      return;
-    } catch (patchErr) {
-      log(`Error setting error status for "${name}" via object patch: ${patchErr.message}`);
-      setTimeout(() => settingStatus.delete(resourceKey), 300);
-      return;
-    }
-  }
-
-  // For non-spec errors, use /status subresource (more efficient, standard practice)
-  try {
+  // CRITICAL: Always use /status subresource for CRDs with status subresource enabled.
+  // Patching status via the main object endpoint does NOT work when subresources.status is enabled.
+  // The API server will silently ignore or reject it depending on version.
+  // Rule: If CRD has subresources.status, ALWAYS write status via /status endpoint.
+  const patchStatus = async () => {
     await k8sCustomApi.patchNamespacedCustomObjectStatus(
       'qdrant.operator',
       'v1alpha1',
@@ -310,105 +280,95 @@ export const setErrorStatus = async (
         headers: { 'Content-Type': 'application/merge-patch+json' }
       }
     );
-    log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
-    setTimeout(() => settingStatus.delete(resourceKey), 300);
-    return;
-  } catch (patchErr) {
-    // Extract error code properly - don't mask non-404 errors
-    // Check statusCode first (most reliable), then code, then body
-    const errorCode =
-      patchErr.statusCode || patchErr.code || (patchErr.body && JSON.parse(patchErr.body)?.code);
+  };
 
-    // Only handle 404 (Not Found) - /status subresource may not exist yet
-    // Other errors (403 RBAC, 409 Conflict, 500 server error) should be properly logged
-    if (errorCode === 404) {
-      // Fallback to patching the object directly (works even when /status subresource doesn't exist)
-      try {
-        await k8sCustomApi.patchNamespacedCustomObject(
-          'qdrant.operator',
-          'v1alpha1',
-          namespace,
-          plural,
-          name,
-          { status: statusPatch },
-          undefined,
-          undefined,
-          undefined,
-          {
-            headers: { 'Content-Type': 'application/merge-patch+json' }
-          }
-        );
-        log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
-        setTimeout(() => settingStatus.delete(resourceKey), 300);
-        return;
-      } catch (fallbackErr) {
-        const fallbackCode =
-          fallbackErr.statusCode ||
-          fallbackErr.code ||
-          (fallbackErr.body && JSON.parse(fallbackErr.body)?.code);
-        log(
-          `Error setting error status for "${name}" (both /status and object patch failed): ${fallbackErr.message} (code: ${fallbackCode || 'unknown'})`
-        );
-        setTimeout(() => settingStatus.delete(resourceKey), 300);
-        return;
+  // Retry with exponential backoff for 404 (eventual consistency - /status may not exist yet for newly created CRs)
+  const MAX_RETRIES = 5;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      await patchStatus();
+      log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
+    } catch (err) {
+      const errorCode = err.statusCode || err.code || (err.body && JSON.parse(err.body)?.code);
+
+      // Handle 404 (Not Found) - /status subresource may not exist yet (eventual consistency)
+      if (errorCode === 404) {
+        if (i < MAX_RETRIES - 1) {
+          const delay = 200 * (i + 1);
+          log(
+            `Status endpoint not available yet for "${name}", retrying in ${delay}ms (attempt ${i + 1}/${MAX_RETRIES})...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        } else {
+          log(
+            `⚠️ Failed to set error status for "${name}" after ${MAX_RETRIES} retries (status endpoint may not be available yet). Error: ${errorMessage}`
+          );
+          setTimeout(() => settingStatus.delete(resourceKey), 300);
+          return;
+        }
       }
-    }
 
-    // Handle 409 (Conflict) - resource version conflict
-    if (errorCode === 409) {
-      // For conflicts, try replace as fallback (requires getting current resource)
-      try {
-        const resCurrent = await k8sCustomApi.getNamespacedCustomObjectStatus({
-          group: 'qdrant.operator',
-          version: 'v1alpha1',
-          namespace: namespace,
-          plural: plural,
-          name: name
-        });
+      // Handle 409 (Conflict) - resource version conflict
+      if (errorCode === 409) {
+        // For conflicts, try replace as fallback (requires getting current resource)
+        try {
+          const resCurrent = await k8sCustomApi.getNamespacedCustomObjectStatus({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: namespace,
+            plural: plural,
+            name: name
+          });
 
-        const newStatus = {
-          apiVersion: apiObj.apiVersion,
-          kind: apiObj.kind,
-          metadata: {
-            name: apiObj.metadata.name,
-            resourceVersion: resCurrent.metadata.resourceVersion
-          },
-          status: {
-            ...(resCurrent.status || {}),
-            ...statusPatch
-          }
-        };
+          const newStatus = {
+            apiVersion: apiObj.apiVersion,
+            kind: apiObj.kind,
+            metadata: {
+              name: apiObj.metadata.name,
+              resourceVersion: resCurrent.metadata.resourceVersion
+            },
+            status: {
+              ...(resCurrent.status || {}),
+              ...statusPatch
+            }
+          };
 
-        await k8sCustomApi.replaceNamespacedCustomObjectStatus({
-          group: 'qdrant.operator',
-          version: 'v1alpha1',
-          namespace: namespace,
-          plural: plural,
-          name: name,
-          body: newStatus
-        });
-        log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
-        setTimeout(() => settingStatus.delete(resourceKey), 300);
-        return;
-      } catch (replaceErr) {
-        const replaceCode =
-          replaceErr.statusCode ||
-          replaceErr.code ||
-          (replaceErr.body && JSON.parse(replaceErr.body)?.code);
-        log(
-          `Error setting error status for "${name}": ${replaceErr.message} (code: ${replaceCode || 'unknown'})`
-        );
-        setTimeout(() => settingStatus.delete(resourceKey), 300);
-        return;
+          await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+            group: 'qdrant.operator',
+            version: 'v1alpha1',
+            namespace: namespace,
+            plural: plural,
+            name: name,
+            body: newStatus
+          });
+          log(
+            `Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`
+          );
+          setTimeout(() => settingStatus.delete(resourceKey), 300);
+          return;
+        } catch (replaceErr) {
+          const replaceCode =
+            replaceErr.statusCode ||
+            replaceErr.code ||
+            (replaceErr.body && JSON.parse(replaceErr.body)?.code);
+          log(
+            `Error setting error status for "${name}": ${replaceErr.message} (code: ${replaceCode || 'unknown'})`
+          );
+          setTimeout(() => settingStatus.delete(resourceKey), 300);
+          return;
+        }
       }
-    }
 
-    // Other errors (403 RBAC, 500 server error, etc.) - don't mask them, log with code
-    log(
-      `Error setting error status for "${name}": ${patchErr.message} (code: ${errorCode || 'unknown'})`
-    );
-    setTimeout(() => settingStatus.delete(resourceKey), 300);
-    return;
+      // Other errors (403 RBAC, 500 server error, etc.) - don't retry, log with code
+      log(
+        `Error setting error status for "${name}": ${err.message} (code: ${errorCode || 'unknown'})`
+      );
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
+    }
   }
 };
 
