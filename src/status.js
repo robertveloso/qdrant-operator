@@ -1,6 +1,6 @@
 import { k8sCustomApi } from './k8s-client.js';
 import { settingStatus, pendingEvents } from './state.js';
-import { log } from './utils.js';
+import { log, logK8sError } from './utils.js';
 
 /**
  * Status Update Lock System
@@ -267,19 +267,24 @@ export const setErrorStatus = async (
   // Writing to the main object works even when /status subresource doesn't exist.
   // This is the pattern used by cert-manager, Crossplane, Knative, and Istio operators.
   if (reason === 'InvalidSpec') {
+    const patchBody = {
+      metadata: {
+        name: name
+      },
+      status: statusPatch
+    };
+
+    // Log the payload being sent (essential for debugging)
+    log(`📤 PATCH ${plural}/${name} (InvalidSpec) payload:\n${JSON.stringify(patchBody, null, 2)}`);
+
     try {
-      await k8sCustomApi.patchNamespacedCustomObject(
+      const res = await k8sCustomApi.patchNamespacedCustomObject(
         'qdrant.operator',
         'v1alpha1',
         namespace,
         plural,
         name,
-        {
-          metadata: {
-            name: name
-          },
-          status: statusPatch
-        },
+        patchBody,
         undefined,
         undefined,
         undefined,
@@ -287,15 +292,21 @@ export const setErrorStatus = async (
           headers: { 'Content-Type': 'application/merge-patch+json' }
         }
       );
+
+      // Log successful response details
+      if (res?.response?.statusCode) {
+        log(
+          `✅ InvalidSpec status patch applied for ${resourceType} "${name}" (statusCode: ${res.response.statusCode})`
+        );
+      } else {
+        log(`✅ InvalidSpec status patch applied for ${resourceType} "${name}"`);
+      }
+
       log(`Set InvalidSpec error for ${resourceType} "${name}": ${errorMessage}`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     } catch (patchErr) {
-      const errorCode =
-        patchErr.statusCode || patchErr.code || (patchErr.body && JSON.parse(patchErr.body)?.code);
-      log(
-        `Error setting InvalidSpec error for "${name}": ${patchErr.message} (code: ${errorCode || 'unknown'})`
-      );
+      logK8sError(patchErr, `patch InvalidSpec status for ${resourceType} "${name}"`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     }
@@ -303,14 +314,21 @@ export const setErrorStatus = async (
 
   // For all other errors (after first reconcile), use /status subresource (more efficient, standard practice)
   // Retry with exponential backoff for 404 (eventual consistency - /status may not exist yet for newly created CRs)
+  const patchBody = { status: statusPatch };
+
+  // Log the payload being sent (essential for debugging)
+  log(
+    `📤 PATCH ${plural}/${name}/status (reason: ${reason}) payload:\n${JSON.stringify(patchBody, null, 2)}`
+  );
+
   const patchStatus = async () => {
-    await k8sCustomApi.patchNamespacedCustomObjectStatus(
+    return await k8sCustomApi.patchNamespacedCustomObjectStatus(
       'qdrant.operator',
       'v1alpha1',
       namespace,
       plural,
       name,
-      { status: statusPatch },
+      patchBody,
       undefined,
       undefined,
       undefined,
@@ -323,7 +341,17 @@ export const setErrorStatus = async (
   const MAX_RETRIES = 5;
   for (let i = 0; i < MAX_RETRIES; i++) {
     try {
-      await patchStatus();
+      const res = await patchStatus();
+
+      // Log successful response details
+      if (res?.response?.statusCode) {
+        log(
+          `✅ Status patch applied for ${resourceType} "${name}" (statusCode: ${res.response.statusCode}, reason: ${reason})`
+        );
+      } else {
+        log(`✅ Status patch applied for ${resourceType} "${name}" (reason: ${reason})`);
+      }
+
       log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
@@ -340,6 +368,7 @@ export const setErrorStatus = async (
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         } else {
+          logK8sError(err, `patch status for ${resourceType} "${name}" (final retry failed)`);
           log(
             `⚠️ Failed to set error status for "${name}" after ${MAX_RETRIES} retries (status endpoint may not be available yet). Error: ${errorMessage}`
           );
@@ -352,6 +381,7 @@ export const setErrorStatus = async (
       if (errorCode === 409) {
         // For conflicts, try replace as fallback (requires getting current resource)
         try {
+          log(`🔄 409 Conflict for "${name}", attempting replace as fallback...`);
           const resCurrent = await k8sCustomApi.getNamespacedCustomObjectStatus({
             group: 'qdrant.operator',
             version: 'v1alpha1',
@@ -373,7 +403,7 @@ export const setErrorStatus = async (
             }
           };
 
-          await k8sCustomApi.replaceNamespacedCustomObjectStatus({
+          const replaceRes = await k8sCustomApi.replaceNamespacedCustomObjectStatus({
             group: 'qdrant.operator',
             version: 'v1alpha1',
             namespace: namespace,
@@ -381,28 +411,29 @@ export const setErrorStatus = async (
             name: name,
             body: newStatus
           });
+
+          if (replaceRes?.response?.statusCode) {
+            log(
+              `✅ Status replace applied for ${resourceType} "${name}" (statusCode: ${replaceRes.response.statusCode}, reason: ${reason})`
+            );
+          } else {
+            log(`✅ Status replace applied for ${resourceType} "${name}" (reason: ${reason})`);
+          }
+
           log(
             `Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`
           );
           setTimeout(() => settingStatus.delete(resourceKey), 300);
           return;
         } catch (replaceErr) {
-          const replaceCode =
-            replaceErr.statusCode ||
-            replaceErr.code ||
-            (replaceErr.body && JSON.parse(replaceErr.body)?.code);
-          log(
-            `Error setting error status for "${name}": ${replaceErr.message} (code: ${replaceCode || 'unknown'})`
-          );
+          logK8sError(replaceErr, `replace status for ${resourceType} "${name}" (409 fallback)`);
           setTimeout(() => settingStatus.delete(resourceKey), 300);
           return;
         }
       }
 
-      // Other errors (403 RBAC, 500 server error, etc.) - don't retry, log with code
-      log(
-        `Error setting error status for "${name}": ${err.message} (code: ${errorCode || 'unknown'})`
-      );
+      // Other errors (403 RBAC, 500 server error, etc.) - don't retry, log with full details
+      logK8sError(err, `patch status for ${resourceType} "${name}" (reason: ${reason})`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     }
