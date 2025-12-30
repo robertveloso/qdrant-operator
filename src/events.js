@@ -39,11 +39,35 @@ export const onEventCluster = async (phase, apiObj) => {
       endTimer();
       return;
     }
-    // ignore duplicated event on watch reconnections (per-cluster)
-    if (lastClusterResourceVersion.get(resourceKey) === apiObj.metadata.resourceVersion) {
+
+    // CRITICAL: Validate spec BEFORE checking for duplicates
+    // InvalidSpec is an admission logic error, not a reconciliation error
+    // It must be detected at event time, before any side effects
+    // This ensures status Error is written immediately, even for the first ADDED event
+    // We must validate BEFORE the duplicate check, otherwise the first ADDED event
+    // might be discarded before validation runs
+    if (['ADDED', 'MODIFIED'].includes(phase)) {
+      const validationError = validateClusterSpec(apiObj.spec);
+      if (validationError) {
+        log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
+        await setErrorStatus(apiObj, validationError, 'cluster', 'InvalidSpec');
+        errorsTotal.inc({ type: 'validation' });
+        // Update resourceVersion to prevent duplicate processing
+        lastClusterResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
+        endTimer();
+        return; // Don't schedule reconcile for invalid specs
+      }
+    }
+
+    // Check for duplicated event on watch reconnections (per-cluster)
+    // This check happens AFTER validation to ensure InvalidSpec is always detected
+    const isDuplicate =
+      lastClusterResourceVersion.get(resourceKey) === apiObj.metadata.resourceVersion;
+    if (isDuplicate) {
       endTimer();
       return;
     }
+
     // update ResourceVersion for this specific cluster
     lastClusterResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
     // Update cache
@@ -108,21 +132,6 @@ export const onEventCluster = async (phase, apiObj) => {
     // Ensure finalizer is present
     await addFinalizer(apiObj, 'qdrantclusters');
 
-    // CRITICAL: Validate spec BEFORE scheduling reconcile
-    // InvalidSpec is an admission logic error, not a reconciliation error
-    // It must be detected at event time, before any side effects
-    // This ensures status Error is written immediately, without depending on reconcile
-    if (['ADDED', 'MODIFIED'].includes(phase)) {
-      const validationError = validateClusterSpec(apiObj.spec);
-      if (validationError) {
-        log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
-        await setErrorStatus(apiObj, validationError, 'cluster', 'InvalidSpec');
-        errorsTotal.inc({ type: 'validation' });
-        endTimer();
-        return; // Don't schedule reconcile for invalid specs
-      }
-    }
-
     // Enqueue reconciliation (declarative model)
     if (['ADDED', 'MODIFIED'].includes(phase)) {
       try {
@@ -166,14 +175,37 @@ export const onEventCollection = async (phase, apiObj) => {
       `📨 Event received for collection "${name}" (phase: ${phase}, resourceVersion: ${apiObj.metadata.resourceVersion}, lastRV: ${lastCollectionResourceVersion.get(resourceKey) || 'none'})`
     );
 
-    // ignore duplicated event on watch reconnections (per-collection)
-    if (lastCollectionResourceVersion.get(resourceKey) === apiObj.metadata.resourceVersion) {
+    // CRITICAL: Validate spec BEFORE checking for duplicates
+    // InvalidSpec is an admission logic error, not a reconciliation error
+    // It must be detected at event time, before any side effects
+    // This ensures status Error is written immediately, even for the first ADDED event
+    // We must validate BEFORE the duplicate check, otherwise the first ADDED event
+    // might be discarded before validation runs
+    if (['ADDED', 'MODIFIED'].includes(phase)) {
+      const validationError = validateCollectionSpec(apiObj.spec);
+      if (validationError) {
+        log(`❌ Invalid spec for collection "${name}": ${validationError}`);
+        await setErrorStatus(apiObj, validationError, 'collection', 'InvalidSpec');
+        errorsTotal.inc({ type: 'validation' });
+        // Update resourceVersion to prevent duplicate processing
+        lastCollectionResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
+        endTimer();
+        return; // Don't schedule reconcile for invalid specs
+      }
+    }
+
+    // Check for duplicated event on watch reconnections (per-collection)
+    // This check happens AFTER validation to ensure InvalidSpec is always detected
+    const isDuplicate =
+      lastCollectionResourceVersion.get(resourceKey) === apiObj.metadata.resourceVersion;
+    if (isDuplicate) {
       log(
         `⏭️ Skipping duplicate event for collection "${name}" (resourceVersion: ${apiObj.metadata.resourceVersion})`
       );
       endTimer();
       return;
     }
+
     // update ResourceVersion for this specific collection
     lastCollectionResourceVersion.set(resourceKey, apiObj.metadata.resourceVersion);
     // Update cache
@@ -224,21 +256,6 @@ export const onEventCollection = async (phase, apiObj) => {
       log(`❌ Error adding finalizer to collection "${name}": ${finalizerErr.message}`);
       // Continue anyway - reconciliation can proceed without finalizer initially
       // Finalizer will be added on next event or periodic reconciliation
-    }
-
-    // CRITICAL: Validate spec BEFORE scheduling reconcile
-    // InvalidSpec is an admission logic error, not a reconciliation error
-    // It must be detected at event time, before any side effects
-    // This ensures status Error is written immediately, without depending on reconcile
-    if (['ADDED', 'MODIFIED'].includes(phase)) {
-      const validationError = validateCollectionSpec(apiObj.spec);
-      if (validationError) {
-        log(`❌ Invalid spec for collection "${name}": ${validationError}`);
-        await setErrorStatus(apiObj, validationError, 'collection', 'InvalidSpec');
-        errorsTotal.inc({ type: 'validation' });
-        endTimer();
-        return; // Don't schedule reconcile for invalid specs
-      }
     }
 
     // Enqueue reconciliation (declarative model)
