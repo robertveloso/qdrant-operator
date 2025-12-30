@@ -261,10 +261,43 @@ export const setErrorStatus = async (
     ]
   };
 
-  // CRITICAL: Always use /status subresource for CRDs with status subresource enabled.
-  // Patching status via the main object endpoint does NOT work when subresources.status is enabled.
-  // The API server will silently ignore or reject it depending on version.
-  // Rule: If CRD has subresources.status, ALWAYS write status via /status endpoint.
+  // CRITICAL: InvalidSpec MUST be written via main object, not /status subresource
+  // For CRDs with subresources.status, the /status endpoint only exists AFTER the first successful reconcile.
+  // InvalidSpec errors occur BEFORE any reconcile runs, so /status doesn't exist yet.
+  // Writing to the main object works even when /status subresource doesn't exist.
+  // This is the pattern used by cert-manager, Crossplane, Knative, and Istio operators.
+  if (reason === 'InvalidSpec') {
+    try {
+      await k8sCustomApi.patchNamespacedCustomObject(
+        'qdrant.operator',
+        'v1alpha1',
+        namespace,
+        plural,
+        name,
+        { status: statusPatch },
+        undefined,
+        undefined,
+        undefined,
+        {
+          headers: { 'Content-Type': 'application/merge-patch+json' }
+        }
+      );
+      log(`Set InvalidSpec error for ${resourceType} "${name}": ${errorMessage}`);
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
+    } catch (patchErr) {
+      const errorCode =
+        patchErr.statusCode || patchErr.code || (patchErr.body && JSON.parse(patchErr.body)?.code);
+      log(
+        `Error setting InvalidSpec error for "${name}": ${patchErr.message} (code: ${errorCode || 'unknown'})`
+      );
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
+    }
+  }
+
+  // For all other errors (after first reconcile), use /status subresource (more efficient, standard practice)
+  // Retry with exponential backoff for 404 (eventual consistency - /status may not exist yet for newly created CRs)
   const patchStatus = async () => {
     await k8sCustomApi.patchNamespacedCustomObjectStatus(
       'qdrant.operator',
@@ -282,7 +315,6 @@ export const setErrorStatus = async (
     );
   };
 
-  // Retry with exponential backoff for 404 (eventual consistency - /status may not exist yet for newly created CRs)
   const MAX_RETRIES = 5;
   for (let i = 0; i < MAX_RETRIES; i++) {
     try {
