@@ -163,6 +163,20 @@ jobs:
           tests/e2e/90-spec-update-rollout.sh
           tests/e2e/95-rollback.sh
           echo "✅ Core E2E tests passed!"
+      - name: Capture operator logs (forensic status logs)
+        if: always()
+        run: |
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "${POD_NAME}" ]; then
+            echo "📋 Capturing forensic status logs from operator..."
+            echo "=== STATUS WRITE LOGS ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" 2>/dev/null | grep -E "\[STATUS\]\[WRITE\]|\[STATUS\]\[VERIFY\]" | tail -100 || echo "No status logs found"
+            echo ""
+            echo "=== RECENT OPERATOR LOGS (last 50 lines) ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" --tail=50 2>/dev/null || echo "Could not fetch logs"
+          else
+            echo "⚠️ Operator pod not found, cannot capture logs"
+          fi
 
   # High Availability tests
   e2e-ha:
@@ -204,6 +218,20 @@ jobs:
           tests/e2e/60-leader-failover-during-reconcile.sh
           tests/e2e/65-operator-crash-loop.sh
           echo "✅ HA E2E tests passed!"
+      - name: Capture operator logs (forensic status logs)
+        if: always()
+        run: |
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "${POD_NAME}" ]; then
+            echo "📋 Capturing forensic status logs from operator..."
+            echo "=== STATUS WRITE LOGS ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" 2>/dev/null | grep -E "\[STATUS\]\[WRITE\]|\[STATUS\]\[VERIFY\]" | tail -100 || echo "No status logs found"
+            echo ""
+            echo "=== RECENT OPERATOR LOGS (last 50 lines) ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" --tail=50 2>/dev/null || echo "Could not fetch logs"
+          else
+            echo "⚠️ Operator pod not found, cannot capture logs"
+          fi
 
   # Cleanup and lifecycle tests
   e2e-cleanup:
@@ -245,6 +273,20 @@ jobs:
           tests/e2e/41-finalizer-under-load.sh
           tests/e2e/100-delete-partial-cleanup.sh
           echo "✅ Cleanup E2E tests passed!"
+      - name: Capture operator logs (forensic status logs)
+        if: always()
+        run: |
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "${POD_NAME}" ]; then
+            echo "📋 Capturing forensic status logs from operator..."
+            echo "=== STATUS WRITE LOGS ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" 2>/dev/null | grep -E "\[STATUS\]\[WRITE\]|\[STATUS\]\[VERIFY\]" | tail -100 || echo "No status logs found"
+            echo ""
+            echo "=== RECENT OPERATOR LOGS (last 50 lines) ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" --tail=50 2>/dev/null || echo "Could not fetch logs"
+          else
+            echo "⚠️ Operator pod not found, cannot capture logs"
+          fi
 
   # Feature tests (PVC, VolumeSnapshot)
   e2e-features:
@@ -286,6 +328,20 @@ jobs:
           tests/e2e/120-volumesnapshot-manual.sh
           tests/e2e/130-volumesnapshot-scheduled.sh
           echo "✅ Features E2E tests passed!"
+      - name: Capture operator logs (forensic status logs)
+        if: always()
+        run: |
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "${POD_NAME}" ]; then
+            echo "📋 Capturing forensic status logs from operator..."
+            echo "=== STATUS WRITE LOGS ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" 2>/dev/null | grep -E "\[STATUS\]\[WRITE\]|\[STATUS\]\[VERIFY\]" | tail -100 || echo "No status logs found"
+            echo ""
+            echo "=== RECENT OPERATOR LOGS (last 50 lines) ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" --tail=50 2>/dev/null || echo "Could not fetch logs"
+          else
+            echo "⚠️ Operator pod not found, cannot capture logs"
+          fi
 
   # API REST tests
   e2e-api:
@@ -329,6 +385,20 @@ jobs:
           tests/e2e/170-api-templates.sh
           tests/e2e/180-api-integration.sh
           echo "✅ API E2E tests passed!"
+      - name: Capture operator logs (forensic status logs)
+        if: always()
+        run: |
+          POD_NAME=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "${POD_NAME}" ]; then
+            echo "📋 Capturing forensic status logs from operator..."
+            echo "=== STATUS WRITE LOGS ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" 2>/dev/null | grep -E "\[STATUS\]\[WRITE\]|\[STATUS\]\[VERIFY\]" | tail -100 || echo "No status logs found"
+            echo ""
+            echo "=== RECENT OPERATOR LOGS (last 50 lines) ==="
+            kubectl logs -n qdrant-operator "${POD_NAME}" --tail=50 2>/dev/null || echo "Could not fetch logs"
+          else
+            echo "⚠️ Operator pod not found, cannot capture logs"
+          fi
 
   # Publish final Docker image tags only after all tests pass
   publish-image:

@@ -52,6 +52,17 @@ fi
 
 log_info "✅ Status is 'Error' (operator correctly detected invalid spec)"
 
+# Capture forensic logs for debugging (always, not just on failure)
+log_info "📋 Capturing forensic status logs from operator..."
+OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ -n "${OPERATOR_POD}" ]; then
+  log_info "Operator pod: ${OPERATOR_POD}"
+  log_info "=== STATUS WRITE LOGS for invalid-image-cluster ==="
+  kubectl logs -n qdrant-operator "${OPERATOR_POD}" 2>/dev/null | grep -E "\[STATUS\]\[.*invalid-image-cluster" | tail -50 || log_warn "No status logs found for invalid-image-cluster"
+  log_info "=== RECENT VALIDATION LOGS ==="
+  kubectl logs -n qdrant-operator "${OPERATOR_POD}" 2>/dev/null | grep -i "invalid-image-cluster\|Invalid spec\|validation" | tail -20 || log_warn "No validation logs found"
+fi
+
 # Verify no StatefulSet was created
 if kubectl get sts invalid-image-cluster -n default 2>/dev/null; then
   log_error "StatefulSet was created despite invalid spec"
@@ -118,6 +129,17 @@ if [ "${STATUS}" != "Error" ]; then
 fi
 
 log_info "✅ Status is 'Error' (operator correctly detected invalid spec)"
+
+# Capture forensic logs for debugging (always, not just on failure)
+log_info "📋 Capturing forensic status logs from operator..."
+OPERATOR_POD=$(kubectl get pod -n qdrant-operator -l app=qdrant-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ -n "${OPERATOR_POD}" ]; then
+  log_info "Operator pod: ${OPERATOR_POD}"
+  log_info "=== STATUS WRITE LOGS for invalid-vector-collection ==="
+  kubectl logs -n qdrant-operator "${OPERATOR_POD}" 2>/dev/null | grep -E "\[STATUS\]\[.*invalid-vector-collection" | tail -50 || log_warn "No status logs found for invalid-vector-collection"
+  log_info "=== RECENT VALIDATION LOGS ==="
+  kubectl logs -n qdrant-operator "${OPERATOR_POD}" 2>/dev/null | grep -i "invalid-vector-collection\|Invalid spec\|validation" | tail -20 || log_warn "No validation logs found"
+fi
 
 # Verify reason field (should be 'InvalidSpec' for validation errors)
 if [ -n "${REASON}" ]; then
