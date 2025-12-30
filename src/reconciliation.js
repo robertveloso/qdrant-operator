@@ -172,14 +172,15 @@ export const reconcileCluster = async (apiObj) => {
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
 
-  // Validate spec before proceeding
+  // Validate spec before proceeding (CRITICAL: do this FIRST, before any operations)
   const desired = apiObj.spec;
   const validationError = validateClusterSpec(desired);
   if (validationError) {
     log(`❌ Invalid spec for cluster "${name}": ${validationError}`);
-    await setErrorStatus(apiObj, validationError, 'cluster');
+    await setErrorStatus(apiObj, validationError, 'cluster', 'InvalidSpec');
     errorsTotal.inc({ type: 'validation' });
-    return; // Don't proceed with reconciliation
+    // Don't requeue - spec error is terminal, user must fix the spec
+    return;
   }
 
   // Get observed state from cache (fast read) with API fallback (source of truth)
@@ -433,13 +434,14 @@ export const reconcileCollection = async (apiObj) => {
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
 
-  // Validate spec before proceeding
+  // Validate spec before proceeding (CRITICAL: do this FIRST, before any operations)
   const validationError = validateCollectionSpec(apiObj.spec);
   if (validationError) {
     log(`❌ Invalid spec for collection "${name}": ${validationError}`);
-    await setErrorStatus(apiObj, validationError, 'collection');
+    await setErrorStatus(apiObj, validationError, 'collection', 'InvalidSpec');
     errorsTotal.inc({ type: 'validation' });
-    return; // Don't proceed with reconciliation
+    // Don't requeue - spec error is terminal, user must fix the spec
+    return;
   }
 
   const clusterName = apiObj.spec?.cluster;

@@ -215,26 +215,119 @@ export const setStatus = async (apiObj, status) => {
 };
 
 // Set error status with message (for invalid spec or other errors)
-export const setErrorStatus = async (apiObj, errorMessage, resourceType = 'cluster') => {
+// Uses patch directly on the received object (no cache lookup) to avoid 404 issues
+export const setErrorStatus = async (
+  apiObj,
+  errorMessage,
+  resourceType = 'cluster',
+  reason = 'InvalidSpec'
+) => {
   const name = apiObj.metadata.name;
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
   settingStatus.set(resourceKey, 'update');
 
-  const maxRetries = 3;
-  let retries = 0;
+  const plural = resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
 
-  while (retries < maxRetries) {
+  // Build status patch using the object we received (no cache lookup needed)
+  const statusPatch = {
+    qdrantStatus: 'Error',
+    errorMessage: errorMessage,
+    reason: reason,
+    observedGeneration: apiObj.metadata.generation || apiObj.metadata.resourceVersion
+  };
+
+  // Try patch first (most efficient, works even if resource just created)
+  try {
+    await k8sCustomApi.patchNamespacedCustomObjectStatus(
+      'qdrant.operator',
+      'v1alpha1',
+      namespace,
+      plural,
+      name,
+      { status: statusPatch },
+      undefined,
+      undefined,
+      undefined,
+      {
+        headers: { 'Content-Type': 'application/merge-patch+json' }
+      }
+    );
+    log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
+    setTimeout(() => settingStatus.delete(resourceKey), 300);
+    return;
+  } catch (patchErr) {
+    const patchErrorCode =
+      patchErr.code || patchErr.statusCode || (patchErr.body && JSON.parse(patchErr.body)?.code);
+    const patchErrMessage = patchErr.message || '';
+
+    // If patch fails with 404, resource might not be fully available yet
+    // For spec validation errors, we still want to try a few times (but not many)
+    // because the resource was just created and might need a moment
+    if (patchErrorCode === 404 || patchErrMessage.includes('not found')) {
+      // For spec errors, try 2-3 times with short delays, then give up
+      // This is a terminal error - user must fix the spec
+      const maxRetries = 3;
+      let retries = 0;
+
+      while (retries < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 200 * (retries + 1)));
+        retries++;
+
+        try {
+          await k8sCustomApi.patchNamespacedCustomObjectStatus(
+            'qdrant.operator',
+            'v1alpha1',
+            namespace,
+            plural,
+            name,
+            { status: statusPatch },
+            undefined,
+            undefined,
+            undefined,
+            {
+              headers: { 'Content-Type': 'application/merge-patch+json' }
+            }
+          );
+          log(
+            `Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`
+          );
+          setTimeout(() => settingStatus.delete(resourceKey), 300);
+          return;
+        } catch (retryErr) {
+          const retryErrorCode =
+            retryErr.code ||
+            retryErr.statusCode ||
+            (retryErr.body && JSON.parse(retryErr.body)?.code);
+          if (retryErrorCode !== 404) {
+            // Not a 404, re-throw to handle as other error
+            throw retryErr;
+          }
+          // Still 404, continue retrying
+        }
+      }
+
+      // After retries, log warning but don't fail - spec error is terminal anyway
+      log(
+        `⚠️ Could not set error status for "${name}" after ${maxRetries} retries (resource may not be fully available yet). Error: ${errorMessage}`
+      );
+      setTimeout(() => settingStatus.delete(resourceKey), 300);
+      return;
+    }
+
+    // For other errors (409, etc.), try replace as fallback
+    log(`Patch failed for "${name}", trying replace as fallback: ${patchErr.message}`);
+
+    // Fallback to replace (requires getting current resource)
     try {
-      const plural = resourceType === 'cluster' ? 'qdrantclusters' : 'qdrantcollections';
-      const readObj = await k8sCustomApi.getNamespacedCustomObjectStatus({
+      const resCurrent = await k8sCustomApi.getNamespacedCustomObjectStatus({
         group: 'qdrant.operator',
         version: 'v1alpha1',
         namespace: namespace,
         plural: plural,
         name: name
       });
-      const resCurrent = readObj;
+
       const newStatus = {
         apiVersion: apiObj.apiVersion,
         kind: apiObj.kind,
@@ -244,8 +337,7 @@ export const setErrorStatus = async (apiObj, errorMessage, resourceType = 'clust
         },
         status: {
           ...(resCurrent.status || {}),
-          qdrantStatus: 'Error',
-          errorMessage: errorMessage
+          ...statusPatch
         }
       };
 
@@ -257,57 +349,15 @@ export const setErrorStatus = async (apiObj, errorMessage, resourceType = 'clust
         name: name,
         body: newStatus
       });
-      log(`Set error status for ${resourceType} "${name}": ${errorMessage}`);
+      log(`Set error status for ${resourceType} "${name}": ${errorMessage} (reason: ${reason})`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
-    } catch (err) {
-      const errorCode = err.code || err.statusCode || (err.body && JSON.parse(err.body)?.code);
-      const errorMessage = err.message || '';
-      const errorBody = err.body || '';
-
-      // Handle 404 (Not Found) - resource may not be fully created yet
-      if (
-        errorCode === 404 ||
-        errorMessage.includes('not found') ||
-        errorBody.includes('NotFound')
-      ) {
-        retries++;
-        if (retries < maxRetries) {
-          log(
-            `Resource "${name}" not found yet, retrying status update (${retries}/${maxRetries})...`
-          );
-          await new Promise((resolve) => setTimeout(resolve, 200 * retries)); // Wait longer for 404
-          continue;
-        } else {
-          log(
-            `Failed to set error status for "${name}" after ${maxRetries} retries: resource not found`
-          );
-          setTimeout(() => settingStatus.delete(resourceKey), 300);
-          return;
-        }
-      }
-
-      // Handle 409 (Conflict) - resource version conflict
-      if (errorCode === 409 || errorMessage.includes('Conflict')) {
-        retries++;
-        if (retries < maxRetries) {
-          log(`Status update conflict for "${name}", retrying (${retries}/${maxRetries})...`);
-          await new Promise((resolve) => setTimeout(resolve, 100 * retries));
-          continue;
-        } else {
-          log(`Failed to set error status for "${name}" after ${maxRetries} retries: conflict`);
-          setTimeout(() => settingStatus.delete(resourceKey), 300);
-          return;
-        }
-      }
-
-      // Other errors
-      log(`Error setting error status for "${name}": ${err.message}`);
+    } catch (replaceErr) {
+      log(`Error setting error status for "${name}": ${replaceErr.message}`);
       setTimeout(() => settingStatus.delete(resourceKey), 300);
       return;
     }
   }
-  setTimeout(() => settingStatus.delete(resourceKey), 300);
 };
 
 // Update the version of last caught cluster

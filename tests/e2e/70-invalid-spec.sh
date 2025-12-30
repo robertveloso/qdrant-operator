@@ -102,12 +102,13 @@ wait_for_status "qdrantcollections" "invalid-vector-collection" "{.status.qdrant
   exit 1
 }
 
-# Give operator a moment to set errorMessage (may take a bit longer)
-log_info "Waiting for errorMessage to be set (if available)..."
+# Give operator a moment to set errorMessage and reason (may take a bit longer)
+log_info "Waiting for errorMessage and reason to be set (if available)..."
 sleep 5
 
-# Get error message
+# Get status fields
 STATUS=$(kubectl get qdrantcollections invalid-vector-collection -n default -o jsonpath='{.status.qdrantStatus}' 2>/dev/null || echo "")
+REASON=$(kubectl get qdrantcollections invalid-vector-collection -n default -o jsonpath='{.status.reason}' 2>/dev/null || echo "")
 ERROR_MSG=$(kubectl get qdrantcollections invalid-vector-collection -n default -o jsonpath='{.status.errorMessage}' 2>/dev/null || echo "")
 
 if [ "${STATUS}" != "Error" ]; then
@@ -116,16 +117,28 @@ if [ "${STATUS}" != "Error" ]; then
   exit 1
 fi
 
+log_info "✅ Status is 'Error' (operator correctly detected invalid spec)"
+
+# Verify reason field (should be 'InvalidSpec' for validation errors)
+if [ -n "${REASON}" ]; then
+  if [ "${REASON}" = "InvalidSpec" ]; then
+    log_info "✅ Reason is 'InvalidSpec' (correctly set)"
+  else
+    log_warn "⚠️ Reason is '${REASON}' (expected 'InvalidSpec')"
+  fi
+else
+  log_warn "⚠️ Reason field not found in status (operator may not set it)"
+fi
+
 # errorMessage is optional - the important part is that status is 'Error'
 if [ -z "${ERROR_MSG}" ]; then
   log_warn "⚠️ errorMessage not found in status (operator may not set it or timing issue)"
   log_warn "Status is 'Error' which indicates operator detected the problem - this is sufficient"
-  ERROR_MSG="(no error message in status)"
 else
   log_info "✅ errorMessage found: ${ERROR_MSG}"
 fi
 
-log_info "✅ Collection status is 'Error' (operator correctly detected invalid spec)"
+log_info "✅ Collection status validation complete"
 
 # Cleanup
 kubectl delete qdrantcollections invalid-vector-collection -n default 2>/dev/null || true
