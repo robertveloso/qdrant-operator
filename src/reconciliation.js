@@ -187,7 +187,15 @@ export const reconcileCluster = async (apiObj) => {
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
 
-  // Validate spec before proceeding (CRITICAL: do this FIRST, before any operations)
+  // 🔒 Terminal state guard: if already in InvalidSpec Error state, skip reconciliation
+  // This prevents concurrent reconciles from overwriting the Error status
+  // Spec inválida é terminal e sticky - nenhum outro reconcile pode limpar ou ignorar isso
+  if (apiObj.status?.qdrantStatus === 'Error' && apiObj.status?.reason === 'InvalidSpec') {
+    log(`⏭️ Cluster "${name}" is in InvalidSpec Error state, skipping reconciliation`);
+    return;
+  }
+
+  // ✅ Always validate spec (allows recovery when spec is fixed)
   const desired = apiObj.spec;
   const validationError = validateClusterSpec(desired);
   if (validationError) {
@@ -449,7 +457,15 @@ export const reconcileCollection = async (apiObj) => {
   const namespace = apiObj.metadata.namespace;
   const resourceKey = `${namespace}/${name}`;
 
-  // Validate spec before proceeding (CRITICAL: do this FIRST, before any operations)
+  // 🔒 Terminal state guard: if already in InvalidSpec Error state, skip reconciliation
+  // This prevents concurrent reconciles from overwriting the Error status
+  // Spec inválida é terminal e sticky - nenhum outro reconcile pode limpar ou ignorar isso
+  if (apiObj.status?.qdrantStatus === 'Error' && apiObj.status?.reason === 'InvalidSpec') {
+    log(`⏭️ Collection "${name}" is in InvalidSpec Error state, skipping reconciliation`);
+    return;
+  }
+
+  // ✅ Always validate spec (allows recovery when spec is fixed)
   const validationError = validateCollectionSpec(apiObj.spec);
   if (validationError) {
     log(`❌ Invalid spec for collection "${name}": ${validationError}`);

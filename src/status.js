@@ -244,11 +244,12 @@ export const setErrorStatus = async (
 
   // Build status patch using the object we received (no cache lookup needed)
   // observedGeneration tracks which spec generation was observed (never use resourceVersion as fallback)
+  // Always include observedGeneration when available - this allows kubectl/UI to know if status matches current spec
   const statusPatch = {
     qdrantStatus: 'Error',
     errorMessage: errorMessage,
     reason: reason,
-    ...(apiObj.metadata.generation && { observedGeneration: apiObj.metadata.generation }),
+    observedGeneration: apiObj.metadata.generation,
     conditions: [
       {
         type: 'Ready',
@@ -313,12 +314,14 @@ export const setErrorStatus = async (
     setTimeout(() => settingStatus.delete(resourceKey), 300);
     return;
   } catch (patchErr) {
-    const patchErrorCode =
-      patchErr.code || patchErr.statusCode || (patchErr.body && JSON.parse(patchErr.body)?.code);
-    const patchErrMessage = patchErr.message || '';
+    // Extract error code properly - don't mask non-404 errors
+    // Check statusCode first (most reliable), then code, then body
+    const errorCode =
+      patchErr.statusCode || patchErr.code || (patchErr.body && JSON.parse(patchErr.body)?.code);
 
-    // Handle 404 (Not Found) - /status subresource may not exist yet
-    if (patchErrorCode === 404 || patchErrMessage.includes('not found')) {
+    // Only handle 404 (Not Found) - /status subresource may not exist yet
+    // Other errors (403 RBAC, 409 Conflict, 500 server error) should be properly logged
+    if (errorCode === 404) {
       // Fallback to patching the object directly (works even when /status subresource doesn't exist)
       try {
         await k8sCustomApi.patchNamespacedCustomObject(
@@ -339,8 +342,12 @@ export const setErrorStatus = async (
         setTimeout(() => settingStatus.delete(resourceKey), 300);
         return;
       } catch (fallbackErr) {
+        const fallbackCode =
+          fallbackErr.statusCode ||
+          fallbackErr.code ||
+          (fallbackErr.body && JSON.parse(fallbackErr.body)?.code);
         log(
-          `Error setting error status for "${name}" (both /status and object patch failed): ${fallbackErr.message}`
+          `Error setting error status for "${name}" (both /status and object patch failed): ${fallbackErr.message} (code: ${fallbackCode || 'unknown'})`
         );
         setTimeout(() => settingStatus.delete(resourceKey), 300);
         return;
@@ -348,7 +355,7 @@ export const setErrorStatus = async (
     }
 
     // Handle 409 (Conflict) - resource version conflict
-    if (patchErrorCode === 409 || patchErrMessage.includes('Conflict')) {
+    if (errorCode === 409) {
       // For conflicts, try replace as fallback (requires getting current resource)
       try {
         const resCurrent = await k8sCustomApi.getNamespacedCustomObjectStatus({
@@ -384,14 +391,22 @@ export const setErrorStatus = async (
         setTimeout(() => settingStatus.delete(resourceKey), 300);
         return;
       } catch (replaceErr) {
-        log(`Error setting error status for "${name}": ${replaceErr.message}`);
+        const replaceCode =
+          replaceErr.statusCode ||
+          replaceErr.code ||
+          (replaceErr.body && JSON.parse(replaceErr.body)?.code);
+        log(
+          `Error setting error status for "${name}": ${replaceErr.message} (code: ${replaceCode || 'unknown'})`
+        );
         setTimeout(() => settingStatus.delete(resourceKey), 300);
         return;
       }
     }
 
-    // Other errors
-    log(`Error setting error status for "${name}": ${patchErr.message}`);
+    // Other errors (403 RBAC, 500 server error, etc.) - don't mask them, log with code
+    log(
+      `Error setting error status for "${name}": ${patchErr.message} (code: ${errorCode || 'unknown'})`
+    );
     setTimeout(() => settingStatus.delete(resourceKey), 300);
     return;
   }
